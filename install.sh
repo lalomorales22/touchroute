@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # TouchRoute installer.
 #   curl -fsSL https://raw.githubusercontent.com/lalomorales22/touchroute/main/install.sh | bash
-# Options (after `bash -s --`):  --no-login   don't start TouchRoute when you log in
+# Options (after `bash -s --`):
+#   --no-login   don't start TouchRoute when you log in
+#   --no-skill   don't add the TouchRoute skill to Claude Code
 set -euo pipefail
 
 REPO="lalomorales22/touchroute"
 APP_NAME="TouchRoute"
 LOGIN=1
+SKILL=1
 for arg in "$@"; do
   case "$arg" in
     --no-login) LOGIN=0 ;;
+    --no-skill) SKILL=0 ;;
   esac
 done
 
@@ -60,6 +64,14 @@ if [ "$LOGIN" = 1 ]; then
 </plist>
 PLIST
   say "TouchRoute will start when you log in. (Remove $AGENT to stop that.)"
+fi
+
+# Teach Claude Code how to set up touches, so users can just ask for one.
+if [ "$SKILL" = 1 ] && [ -d "$HOME/.claude" ]; then
+  mkdir -p "$HOME/.claude/skills/touchroute"
+  if curl -fsSL "https://raw.githubusercontent.com/$REPO/main/skills/touchroute/SKILL.md" -o "$HOME/.claude/skills/touchroute/SKILL.md"; then
+    say "Added the TouchRoute skill to Claude Code. Try asking Claude: \"make 4 fingers for 3 seconds open Spotify\""
+  fi
 fi
 
 open "$DEST/$APP_NAME.app"

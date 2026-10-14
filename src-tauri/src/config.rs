@@ -64,11 +64,48 @@ pub fn valid_key(key: &str) -> bool {
     ok(parts.next()) && ok(parts.next()) && parts.next().is_none()
 }
 
+fn config_path() -> PathBuf {
+    home().join("config.json")
+}
+
+fn modified() -> Option<std::time::SystemTime> {
+    fs::metadata(config_path()).and_then(|m| m.modified()).ok()
+}
+
+fn read_disk() -> Option<Config> {
+    fs::read_to_string(config_path()).ok().and_then(|s| serde_json::from_str(&s).ok())
+}
+
+/// When config.json was last written, by us or by anyone else.
+static SEEN: Mutex<Option<std::time::SystemTime>> = Mutex::new(None);
+
+/// Picks up edits made outside the app (by hand or by an AI agent following
+/// the TouchRoute skill). Returns true if the config changed. A file that
+/// doesn't parse is ignored until it's fixed.
+pub fn reload_if_changed() -> bool {
+    let now = modified();
+    let mut seen = SEEN.lock().unwrap();
+    if now.is_none() || now == *seen {
+        return false;
+    }
+    *seen = now;
+    drop(seen);
+    match read_disk() {
+        Some(mut cfg) => {
+            if let Some(cur) = CONFIG.lock().unwrap().as_ref() {
+                cfg.buddy_position = cfg.buddy_position.or(cur.buddy_position);
+            }
+            *CONFIG.lock().unwrap() = Some(cfg);
+            true
+        }
+        None => false,
+    }
+}
+
 pub fn init() {
     let _ = fs::create_dir_all(scripts_dir());
     let _ = fs::create_dir_all(logs_dir());
-    let path = home().join("config.json");
-    let cfg = match fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str(&s).ok()) {
+    let cfg = match read_disk() {
         Some(cfg) => cfg,
         None => {
             // First run: 5 fingers for 5 seconds talks to Claude.
@@ -100,9 +137,10 @@ pub fn save() {
             cfg.buddy_position = pos;
         }
         if let Ok(json) = serde_json::to_string_pretty(cfg) {
-            let _ = fs::write(home().join("config.json"), json);
+            let _ = fs::write(config_path(), json);
         }
     }
+    *SEEN.lock().unwrap() = modified();
 }
 
 pub fn flush_position() {

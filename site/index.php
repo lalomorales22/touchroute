@@ -1,7 +1,7 @@
 <?php
 // TouchRoute landing page. Drop this file on any PHP host.
 $repo    = 'lalomorales22/touchroute';
-$version = '0.1.0';
+$version = '0.2.0';
 $dmg     = "https://github.com/$repo/releases/latest/download/TouchRoute.dmg";
 $install = "curl -fsSL https://raw.githubusercontent.com/$repo/main/install.sh | bash";
 $github  = "https://github.com/$repo";
@@ -252,7 +252,7 @@ $h = fn($s) => htmlspecialchars($s, ENT_QUOTES);
         <h3>macOS</h3>
         <p>Works with the built-in trackpad and the Magic Trackpad.</p>
         <div class="cmd"><code id="cmd"><?= $h($install) ?></code><button type="button" id="copy">Copy</button></div>
-        <div class="after">To write touches with AI, install <a href="https://claude.com/claude-code">Claude Code</a> too. Without it you can still use quick starts or your own scripts.</div>
+        <div class="after">To write touches with AI, install <a href="https://claude.com/claude-code">Claude Code</a> too. The installer adds a TouchRoute skill to it, so you can just ask Claude to set up a touch. Without it you can still use quick starts or your own scripts.</div>
       </div>
       <div class="card later">
         <h3>Windows and Linux</h3>

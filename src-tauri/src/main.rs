@@ -222,6 +222,18 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Reloads ~/.touchroute/config.json when something else edits it, so an AI
+/// agent (or a text editor) can add touches while the app is running.
+fn watch_config(app: AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        if config::reload_if_changed() {
+            eprintln!("touchroute: config.json changed on disk, reloaded");
+            config_changed(&app);
+        }
+    });
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -250,6 +262,7 @@ fn main() {
             }
             #[cfg(target_os = "macos")]
             touch_macos::watch();
+            watch_config(app.handle().clone());
             Ok(())
         })
         .build(tauri::generate_context!())

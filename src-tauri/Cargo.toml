@@ -1,0 +1,23 @@
+[package]
+name = "touchroute"
+version = "0.1.0"
+description = "Hold fingers on your trackpad to run anything"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+
+# Build scripts and proc macros must not be stripped: on macOS 27 that
+# corrupts their dylibs ("mis-aligned LINKEDIT string pool").
+[profile.release.build-override]
+strip = false
+debug = false

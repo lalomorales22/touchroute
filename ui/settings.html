@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TouchRoute</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <div class="titlebar" data-tauri-drag-region>
+    <div class="brand" data-tauri-drag-region>
+      <span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+      TouchRoute
+    </div>
+    <div class="live" id="live" data-tauri-drag-region>Put fingers on your trackpad to see them here</div>
+    <label class="switch">
+      <input type="checkbox" id="enabled">
+      <span class="track"><span class="knob"></span></span>
+      <span id="enabledText">On</span>
+    </label>
+  </div>
+
+  <main>
+    <section class="board">
+      <h1>Rows are fingers. Columns are seconds.</h1>
+      <p class="lede">Pick a square, tell it what to do, then hold that many fingers still for that many seconds and let go.</p>
+      <div class="grid-wrap">
+        <div class="grid" id="grid" role="grid" aria-label="Touch slots"></div>
+      </div>
+      <p class="note" id="note"></p>
+    </section>
+
+    <aside class="editor" id="editor">
+      <div class="blank" id="blank">
+        <div class="blank-art" aria-hidden="true"></div>
+        <p>Choose a square on the left to set up a touch.</p>
+        <p class="hint">Try a 5·5 for opening Claude: five fingers, five seconds.</p>
+      </div>
+
+      <form id="form" hidden autocomplete="off">
+        <div class="slot-head">
+          <div class="slot-code" id="slotCode"></div>
+          <div>
+            <div class="slot-desc" id="slotDesc"></div>
+            <div class="slot-state" id="slotState"></div>
+          </div>
+        </div>
+
+        <label class="field">
+          <span>Name</span>
+          <input id="name" maxlength="40" placeholder="Shows up on your buddy">
+        </label>
+
+        <div class="field">
+          <span>What should it do?</span>
+          <textarea id="request" rows="3"></textarea>
+          <div class="ask-row">
+            <button type="button" class="btn ask" id="ask">
+              <span class="spark" aria-hidden="true"></span><span id="askText">Write it with Claude</span>
+            </button>
+            <span class="status" id="askStatus" role="status"></span>
+          </div>
+        </div>
+
+        <div class="field">
+          <span>Or start from</span>
+          <div class="chips" id="chips">
+            <button type="button" class="chip" data-t="app">Open an app</button>
+            <button type="button" class="chip" data-t="url">Open a website</button>
+            <button type="button" class="chip" data-t="term">Run in Terminal</button>
+            <button type="button" class="chip" data-t="sh">Run my .sh file</button>
+          </div>
+          <div class="quick" id="quick" hidden>
+            <input id="quickInput">
+            <button type="button" class="btn" id="quickUse">Use this</button>
+          </div>
+        </div>
+
+        <details class="script" id="scriptBox">
+          <summary>
+            <span>Script</span>
+            <span class="path" id="scriptPath"></span>
+          </summary>
+          <textarea id="script" spellcheck="false" rows="12"></textarea>
+        </details>
+
+        <div class="actions">
+          <button type="submit" class="btn primary" id="save">Save touch</button>
+          <button type="button" class="btn" id="test">Save and try</button>
+          <button type="button" class="btn quiet" id="remove">Remove</button>
+        </div>
+        <div class="foot">
+          <button type="button" class="link" id="openScripts">Open scripts folder</button>
+          <button type="button" class="link" id="openLogs">Open logs</button>
+        </div>
+      </form>
+    </aside>
+  </main>
+<script type="module" src="settings.js"></script>
+</body>
+</html>

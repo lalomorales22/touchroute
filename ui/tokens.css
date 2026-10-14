@@ -1,0 +1,29 @@
+/* Shared by the buddy and settings. Each finger count has its own color on a
+   cool-to-warm spectrum, so a dot's color tells you how many fingers it takes. */
+:root {
+  color-scheme: dark;
+  --void: #000000;
+  --raised: rgba(255, 255, 255, 0.045);
+  --raised-hi: rgba(255, 255, 255, 0.08);
+  --line: rgba(255, 255, 255, 0.09);
+  --line-hi: rgba(255, 255, 255, 0.18);
+  --text: #f2f1f7;
+  --dim: #8c8b99;
+  --faint: #55545f;
+  --danger: #ff6b81;
+  --round: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+button { font: inherit; color: inherit; }
+
+:focus-visible { outline: 2px solid hsl(230 95% 72%); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
+
+[hidden] { display: none !important; }

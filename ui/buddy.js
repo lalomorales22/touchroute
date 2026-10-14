@@ -1,334 +1,437 @@
 import { invoke, listen, win, currentMonitor, LogicalSize, LogicalPosition, fingerColor, parseKey, slotCode, plural } from "./shared.js";
 
-// Each configured touch is one dot in the buddy. Zooming in flies every dot to
-// its row in the list, so the creature literally is your touches.
+// The buddy is just its dots, floating on the desktop with no backing. Each
+// colored dot is one of your touches. Zooming in spreads them slowly into a
+// dial: rings are fingers (1 in the middle), spokes are seconds (1s at the
+// top, clockwise), so every touch sits at its own fingers-by-seconds spot.
 
-const COMPACT = 168;
-const OPEN_W = 340;
-const MIN_DOTS = 22;
+const COMPACT = 200;
+const DIAL = 500;
+const RING0 = 72;     // radius of the 1-finger ring (leaves room for the hub)
+const RING_STEP = 15; // distance between rings
+const TRAVEL = 1.15;  // seconds each dot takes to fly between modes
+const STAGGER = 0.06; // extra delay per ring, so the dial unfolds outward
+const MIN_DUST = 16;
 
 const canvas = document.getElementById("c");
 const ctx = canvas.getContext("2d");
-const readout = document.getElementById("readout");
-const codeEl = document.getElementById("code");
-const labelEl = document.getElementById("label");
-const rowsEl = document.getElementById("rows");
-const subEl = document.getElementById("sub");
+const $ = (id) => document.getElementById(id);
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const displayFont = getComputedStyle(document.documentElement).getPropertyValue("--display");
 
 let state = null;
-let slots = [];
-let dots = [];
-let open = false;
-let busy = false;           // window resize in progress
-let shift = { x: 0, y: 0 }; // how far the window moved to fit on screen when opened
+let slots = new Map();   // key -> { f, s, name }
+let dots = [];           // living dots, one per touch
+let dust = [];           // tiny ambient motes that keep an empty buddy alive
+let open = false;        // target mode
+let openT = 0;           // 0 = cluster; counts up while the dial unfolds
+let resizing = false;
+let shift = { x: 0, y: 0 };
+let hover = null;        // dial spot under the cursor
+let mouse = null;        // cursor position, for the dots to lean toward
 let touch = { phase: "idle", fingers: 0, elapsed: 0, slot: null, at: 0 };
 let burst = 0;
 let readoutUntil = 0;
-const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 // ---------- data ----------
 
 function applyState(s) {
   state = s;
-  document.body.classList.toggle("paused", !s.config.enabled);
-  slots = Object.entries(s.config.slots)
-    .map(([key, v]) => { const [f, sec] = parseKey(key); return { key, f, s: sec, name: v.name }; })
-    .sort((a, b) => a.f - b.f || a.s - b.s);
-  buildDots();
-  renderList();
+  slots = new Map(Object.entries(s.config.slots).map(([key, v]) => {
+    const [f, sec] = parseKey(key);
+    return [key, { f, s: sec, name: v.name }];
+  }));
+  const old = new Map(dots.map((d) => [d.key, d]));
+  dots = [...slots.entries()]
+    .sort(([, a], [, b]) => a.f - b.f || a.s - b.s)
+    .map(([key, v], i) => Object.assign(old.get(key) ?? spawn(i, true), { key, f: v.f, s: v.s }));
+  const want = Math.max(8, MIN_DUST - dots.length);
+  while (dust.length < want) dust.push(spawn(dust.length + 7, false));
+  dust.length = want;
+  updateHub();
 }
 
-function buildDots() {
-  const old = new Map(dots.filter((d) => d.key).map((d) => [d.key, d]));
-  const c = center();
-  const next = slots.map((s, i) => {
-    const prev = old.get(s.key);
-    return prev ? Object.assign(prev, { f: s.f, s: s.s }) : makeDot(i, s, c);
-  });
-  const ambient = Math.max(6, MIN_DOTS - slots.length);
-  for (let i = 0; i < ambient; i++) next.push(makeDot(slots.length + i, null, c));
-  dots = next;
-}
-
-function makeDot(i, slot, c) {
-  const seed = Math.random() * 1000;
+function spawn(i, alive) {
+  const c = clusterCenter();
   return {
-    key: slot?.key ?? null,
-    f: slot?.f ?? 0,
-    s: slot?.s ?? 0,
-    x: c.x + (Math.random() - 0.5) * 20,
-    y: c.y + (Math.random() - 0.5) * 20,
-    vx: 0, vy: 0,
-    angle: i * 2.39996 + Math.random() * 0.3, // golden-angle spread
-    orbit: 14 + Math.sqrt(i + 1) * 9.5,
-    speed: (0.18 + Math.random() * 0.22) * (Math.random() < 0.5 ? -1 : 1),
-    seed,
-    size: slot ? 3.2 + Math.min(slot.s, 8) * 0.28 : 1.2 + Math.random() * 1.3,
-    tint: 1 + Math.floor(Math.random() * 10),
-    alpha: slot ? 1 : 0.5,
+    x: c.x, y: c.y, lx: c.x, ly: c.y,
+    angle: i * 2.39996 + Math.random() * 0.4,
+    orbit: (alive ? 16 : 22) + Math.sqrt(i + 1) * (alive ? 11 : 12),
+    speed: (0.16 + Math.random() * 0.2) * (Math.random() < 0.5 ? -1 : 1),
+    seed: Math.random() * 1000,
+    hopAt: performance.now() / 1000 + 2 + Math.random() * 8,
+    size: alive ? 0 : 1.3 + Math.random() * 1.4,
     lit: 1,
   };
 }
 
-function renderList() {
-  subEl.textContent = slots.length ? `${plural(slots.length, "touch", "touches")} set up` : "Nothing set up yet";
-  rowsEl.innerHTML = "";
-  if (!slots.length) {
-    rowsEl.innerHTML = `<div class="empty">Hold fingers on your trackpad,<br>let go, and something happens.<br><button id="first">Set up your first touch</button></div>`;
-    rowsEl.querySelector("#first").onclick = () => invoke("open_settings", { slot: null });
-    return;
-  }
-  let lastF = 0;
-  let group;
-  for (const s of slots) {
-    if (s.f !== lastF) {
-      lastF = s.f;
-      group = document.createElement("div");
-      group.className = "group";
-      group.innerHTML = `<h2>${plural(s.f, "finger")}</h2>`;
-      rowsEl.appendChild(group);
-    }
-    const row = document.createElement("div");
-    row.className = "row";
-    row.dataset.key = s.key;
-    row.innerHTML = `<span class="pin"></span><span class="c"></span><span class="n"></span>`;
-    row.querySelector(".c").textContent = slotCode(s.f, s.s);
-    row.querySelector(".n").textContent = s.name;
-    row.onclick = () => invoke("open_settings", { slot: s.key });
-    group.appendChild(row);
-  }
-}
-
-function openHeight() {
-  const groups = new Set(slots.map((s) => s.f)).size;
-  return Math.round(Math.min(560, Math.max(250, 104 + slots.length * 30 + groups * 33)));
-}
-
 // ---------- geometry ----------
 
-function size() {
-  return { w: canvas.clientWidth, h: canvas.clientHeight };
-}
+const view = () => ({ w: canvas.clientWidth, h: canvas.clientHeight });
+const clusterCenter = () => ({ x: shift.x + COMPACT / 2, y: shift.y + COMPACT / 2 });
+const dialCenter = () => ({ x: DIAL / 2, y: DIAL / 2 });
+const maxSeconds = () => state?.maxSeconds ?? 8;
+const maxFingers = () => state?.maxFingers ?? 10;
 
-function center() {
-  // While open, the creature's "home" stays where the compact window was.
-  return open ? { x: shift.x + COMPACT / 2, y: shift.y + COMPACT / 2 } : { x: COMPACT / 2, y: COMPACT / 2 };
+function latticePoint(f, s) {
+  const c = dialCenter();
+  const r = RING0 + (f - 1) * RING_STEP;
+  const a = -Math.PI / 2 + ((s - 1) / maxSeconds()) * Math.PI * 2;
+  return { x: c.x + Math.cos(a) * r, y: c.y + Math.sin(a) * r };
 }
 
 function resizeCanvas() {
   const dpr = devicePixelRatio || 1;
-  const { w, h } = size();
+  const { w, h } = view();
   canvas.width = w * dpr;
   canvas.height = h * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 new ResizeObserver(resizeCanvas).observe(canvas);
 
+const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const clamp01 = (t) => Math.max(0, Math.min(1, t));
+
+// How far along its flight a dot on ring f is (0 = cluster, 1 = dial).
+const progress = (f) => ease(clamp01((openT - (f - 1) * STAGGER) / TRAVEL));
+const fullyOpen = () => TRAVEL + maxFingers() * STAGGER;
+const settled = () => open && openT > fullyOpen() * 0.8;
+
 // ---------- zoom ----------
 
 async function setOpen(next) {
-  if (next === open || busy) return;
-  busy = true;
-  const scale = await win.scaleFactor();
-  const pos = (await win.outerPosition()).toLogical(scale);
+  if (next === open || resizing) return;
   if (next) {
-    const H = openHeight();
-    let x = pos.x, y = pos.y;
+    // The window grows invisibly (it's transparent), centered on the cluster.
+    resizing = true;
+    const scale = await win.scaleFactor();
+    const pos = (await win.outerPosition()).toLogical(scale);
+    let x = pos.x - (DIAL - COMPACT) / 2;
+    let y = pos.y - (DIAL - COMPACT) / 2;
     const mon = await currentMonitor();
     if (mon) {
-      const mpos = mon.position.toLogical(mon.scaleFactor);
-      const msize = mon.size.toLogical(mon.scaleFactor);
-      x = Math.min(x, mpos.x + msize.width - OPEN_W - 8);
-      y = Math.min(y, mpos.y + msize.height - H - 8);
+      const mp = mon.position.toLogical(mon.scaleFactor);
+      const ms = mon.size.toLogical(mon.scaleFactor);
+      x = Math.max(mp.x, Math.min(x, mp.x + ms.width - DIAL));
+      y = Math.max(mp.y + 24, Math.min(y, mp.y + ms.height - DIAL));
     }
     shift = { x: pos.x - x, y: pos.y - y };
-    for (const d of dots) { d.x += shift.x; d.y += shift.y; }
-    await win.setSize(new LogicalSize(OPEN_W, H));
-    if (shift.x || shift.y) await win.setPosition(new LogicalPosition(x, y));
+    moveAll(shift.x, shift.y);
+    await win.setPosition(new LogicalPosition(x, y));
+    await win.setSize(new LogicalSize(DIAL, DIAL));
+    resizing = false;
     open = true;
     document.body.classList.add("open");
   } else {
-    document.body.classList.remove("open");
     open = false;
-    // Let the dots fly home before the window shrinks around them.
-    await new Promise((r) => setTimeout(r, reduced ? 0 : 280));
-    for (const d of dots) { d.x -= shift.x; d.y -= shift.y; }
-    await win.setSize(new LogicalSize(COMPACT, COMPACT));
-    if (shift.x || shift.y) await win.setPosition(new LogicalPosition(pos.x + shift.x, pos.y + shift.y));
-    shift = { x: 0, y: 0 };
+    hover = null;
+    updateHub();
+    document.body.classList.remove("open");
   }
-  busy = false;
 }
 
-document.addEventListener("dblclick", (e) => {
-  if (e.target.closest?.(".row, button")) return;
-  setOpen(!open);
-});
+function moveAll(dx, dy) {
+  for (const d of [...dots, ...dust]) { d.x += dx; d.y += dy; d.lx += dx; d.ly += dy; }
+}
 
-document.addEventListener("wheel", (e) => {
-  const pinch = e.ctrlKey;
-  if (!open && e.deltaY < -2) setOpen(true);
-  else if (open && (pinch ? e.deltaY > 2 : e.deltaY > 6 && rowsEl.scrollTop <= 0 && !e.target.closest?.("#rows"))) setOpen(false);
-}, { passive: true });
+// Runs once the dots have flown home after closing.
+async function shrink() {
+  resizing = true;
+  const scale = await win.scaleFactor();
+  const pos = (await win.outerPosition()).toLogical(scale);
+  const back = { ...shift };
+  shift = { x: 0, y: 0 };
+  moveAll(-back.x, -back.y);
+  await win.setSize(new LogicalSize(COMPACT, COMPACT));
+  await win.setPosition(new LogicalPosition(pos.x + back.x, pos.y + back.y));
+  resizing = false;
+}
 
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") setOpen(false); });
-document.getElementById("gear").onclick = () => invoke("open_settings", { slot: null });
+// ---------- input ----------
 
-// Drag the buddy anywhere; a plain click or double-click still works.
+function spotAt(x, y) {
+  let best = null;
+  let bestD = 11;
+  for (let f = 1; f <= maxFingers(); f++) {
+    for (let s = 1; s <= maxSeconds(); s++) {
+      const p = latticePoint(f, s);
+      const d = Math.hypot(p.x - x, p.y - y);
+      if (d < bestD) { bestD = d; best = `${f}-${s}`; }
+    }
+  }
+  return best;
+}
+
 let press = null;
 document.addEventListener("mousedown", (e) => {
-  if (e.button !== 0 || e.target.closest?.(".row, button, #rows")) return;
-  press = { x: e.screenX, y: e.screenY };
+  if (e.button !== 0 || e.target.closest?.("button")) return;
+  press = { x: e.screenX, y: e.screenY, cx: e.clientX, cy: e.clientY };
 });
 document.addEventListener("mousemove", (e) => {
-  if (press && Math.hypot(e.screenX - press.x, e.screenY - press.y) > 3) {
+  mouse = { x: e.clientX, y: e.clientY };
+  if (press && Math.hypot(e.screenX - press.x, e.screenY - press.y) > 4) {
     press = null;
     win.startDragging();
+    return;
+  }
+  if (settled()) {
+    const next = spotAt(e.clientX, e.clientY);
+    if (next !== hover) { hover = next; updateHub(); }
   }
 });
-document.addEventListener("mouseup", () => (press = null));
-document.addEventListener("mouseenter", () => document.body.classList.add("hot"));
-document.addEventListener("mouseleave", () => document.body.classList.remove("hot"));
+document.addEventListener("mouseup", () => {
+  if (press && settled()) {
+    const key = spotAt(press.cx, press.cy);
+    if (key) invoke("open_settings", { slot: key });
+  }
+  press = null;
+});
+document.addEventListener("mouseleave", () => {
+  mouse = null;
+  if (hover) { hover = null; updateHub(); }
+});
+document.addEventListener("dblclick", (e) => {
+  if (e.target.closest?.("button")) return;
+  if (settled() && spotAt(e.clientX, e.clientY)) return; // that was a click on a spot
+  setOpen(!open);
+});
+document.addEventListener("wheel", (e) => {
+  if (e.deltaY < -3) setOpen(true);
+  else if (e.deltaY > 3) setOpen(false);
+}, { passive: true });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") setOpen(false); });
+$("gear").onclick = () => invoke("open_settings", { slot: null });
 
-// ---------- touch feedback ----------
+// ---------- text ----------
 
-function slotName(key) {
-  return state?.config.slots[key]?.name;
+function updateHub() {
+  if (hover) {
+    const [f, s] = parseKey(hover);
+    const slot = slots.get(hover);
+    $("hubCode").textContent = slotCode(f, s);
+    $("hubCode").style.color = fingerColor(f, 1, 84);
+    $("hubName").textContent = slot ? slot.name : "Empty";
+    $("hubMeta").textContent = slot ? `${plural(f, "finger")}, ${plural(s, "second")}` : "Click to set it up";
+  } else {
+    $("hubCode").textContent = String(slots.size);
+    $("hubCode").style.color = "";
+    $("hubName").textContent = slots.size === 1 ? "touch set up" : "touches set up";
+    $("hubMeta").textContent = slots.size ? "Point at a dot to see it" : "Click any spot to add one";
+  }
 }
 
 function showReadout(code, label, ms) {
-  codeEl.textContent = code;
-  labelEl.textContent = label;
-  readout.classList.add("show");
+  $("code").textContent = code;
+  $("label").textContent = label;
+  $("readout").classList.add("show");
   readoutUntil = ms ? performance.now() + ms : Infinity;
 }
 
 listen("touch", ({ payload: p }) => {
   touch = { ...p, at: performance.now() };
-  const max = state?.maxSeconds ?? 8;
-  if (p.phase === "holding") {
+  const name = (key) => slots.get(key)?.name;
+  if (p.phase === "settling") {
+    showReadout(String(p.fingers), `${plural(p.fingers, "finger")}, hold still`, 0);
+  } else if (p.phase === "holding") {
     const sec = Math.floor(p.elapsed);
-    const key = `${p.fingers}-${sec}`;
     if (sec < 1) showReadout(String(p.fingers), plural(p.fingers, "finger"), 0);
-    else showReadout(slotCode(p.fingers, sec), slotName(key) ?? (sec > max ? "let go to cancel" : "nothing here yet"), 0);
+    else showReadout(slotCode(p.fingers, sec), name(`${p.fingers}-${sec}`) ?? (sec > maxSeconds() ? "let go to cancel" : "nothing here yet"), 0);
   } else if (p.phase === "fired") {
     burst = 1;
     const [f, s] = parseKey(p.slot);
-    showReadout(slotCode(f, s), slotName(p.slot) ?? "", 1600);
+    showReadout(slotCode(f, s), name(p.slot) ?? "", 1800);
   } else if (p.phase === "empty") {
     const [f, s] = parseKey(p.slot);
-    showReadout(slotCode(f, s), "nothing here yet", 1200);
+    showReadout(slotCode(f, s), "nothing here yet", 1300);
   } else if (p.phase === "cancelled") {
-    showReadout("×", "cancelled", 700);
+    showReadout("×", "cancelled", 800);
   } else {
-    readoutUntil = Math.min(readoutUntil, performance.now() + 150);
+    readoutUntil = Math.min(readoutUntil, performance.now() + 200);
   }
 });
 
 listen("config", ({ payload }) => applyState(payload));
 
-// ---------- animation ----------
+// ---------- drawing ----------
 
-let last = performance.now();
-let frameSkip = false;
+// A dot is a little bead: a soft halo, a dark rim so it reads on light
+// wallpapers, a shaded body, and a highlight so it feels round.
+function bead(x, y, r, f, alpha, lit) {
+  const halo = r * (2.4 + lit);
+  const glow = ctx.createRadialGradient(x, y, r * 0.6, x, y, halo);
+  glow.addColorStop(0, fingerColor(f, 0.3 * alpha * lit));
+  glow.addColorStop(1, fingerColor(f, 0));
+  ctx.fillStyle = glow;
+  ctx.beginPath(); ctx.arc(x, y, halo, 0, 7); ctx.fill();
 
-function frame(now) {
-  requestAnimationFrame(frame);
-  const active = open || busy || touch.phase === "holding" || burst > 0.01 || readout.classList.contains("show");
-  // A resting buddy runs at 30fps to stay light on the battery.
-  frameSkip = !frameSkip;
-  if (!active && frameSkip) return;
-  const dt = Math.min(0.05, (now - last) / 1000);
-  last = now;
-  const t = now / 1000;
+  ctx.fillStyle = `rgba(0,0,0,${0.35 * alpha})`;
+  ctx.beginPath(); ctx.arc(x, y + 0.8, r + 1, 0, 7); ctx.fill();
 
-  if (now > readoutUntil) readout.classList.remove("show");
+  const body = ctx.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.1, x, y, r);
+  body.addColorStop(0, fingerColor(f, alpha, 90));
+  body.addColorStop(1, fingerColor(f, alpha, 62));
+  ctx.fillStyle = body;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
 
-  const { w, h } = size();
-  ctx.clearRect(0, 0, w, h);
-  const c = center();
-  const holding = touch.phase === "holding";
-  const elapsed = holding ? touch.elapsed + (now - touch.at) / 1000 : 0;
-  const breathe = 1 + Math.sin(t * 1.3) * 0.05;
-  const squeeze = holding ? 0.62 : 1;
-  burst *= Math.pow(0.04, dt);
+  ctx.fillStyle = `rgba(255,255,255,${0.5 * alpha})`;
+  ctx.beginPath(); ctx.arc(x - r * 0.33, y - r * 0.38, r * 0.26, 0, 7); ctx.fill();
+}
 
-  const pins = open ? pinPositions() : null;
-  const ease = 1 - Math.exp(-dt * (open ? 9 : 6));
-
-  for (const d of dots) {
-    let tx, ty, ta;
-    if (open && d.key && pins.has(d.key)) {
-      ({ x: tx, y: ty } = pins.get(d.key));
-      ta = 1;
-    } else {
-      d.angle += d.speed * dt * (holding ? 3.2 : 1);
-      const wob = reduced ? 0 : Math.sin(t * 1.9 + d.seed) * 3.2 + Math.sin(t * 0.7 + d.seed * 2) * 2.4;
-      const r = (d.orbit * breathe + wob) * squeeze * (1 + burst * 0.9);
-      tx = c.x + Math.cos(d.angle) * r;
-      ty = c.y + Math.sin(d.angle) * r * 0.86;
-      ta = open ? 0 : d.key ? 1 : 0.5;
-    }
-    d.x += (tx - d.x) * ease;
-    d.y += (ty - d.y) * ease;
-    d.alpha += (ta - d.alpha) * ease;
-    const litTarget = holding && touch.fingers ? (d.f === touch.fingers ? 1.6 : 0.35) : 1;
-    d.lit += (litTarget - d.lit) * ease;
+function drawDial(alpha) {
+  if (alpha < 0.01) return;
+  const c = dialCenter();
+  const F = maxFingers(), S = maxSeconds();
+  ctx.lineWidth = 1;
+  for (let f = 1; f <= F; f++) {
+    ctx.strokeStyle = `rgba(255,255,255,${0.06 * alpha})`;
+    ctx.beginPath(); ctx.arc(c.x, c.y, RING0 + (f - 1) * RING_STEP, 0, 7); ctx.stroke();
   }
-
-  if (holding || touch.phase === "fired") drawRing(c, elapsed);
-
-  for (const d of dots) {
-    if (d.alpha < 0.02) continue;
-    // Ambient dots carry a faint tint of the finger spectrum so the buddy never looks empty.
-    const color = d.key ? fingerColor(d.f, Math.min(1, d.alpha * d.lit)) : `hsla(${(188 + (d.tint - 1) * 19) % 360}, 40%, 75%, ${d.alpha * 0.55 * Math.min(1, d.lit)})`;
-    ctx.shadowColor = d.key ? fingerColor(d.f, 0.9) : "transparent";
-    ctx.shadowBlur = d.key ? 10 * d.lit : 0;
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(d.x, d.y, d.size * (d.lit > 1.2 ? 1.25 : 1), 0, Math.PI * 2);
-    ctx.fill();
+  for (let f = 1; f <= F; f++) {
+    for (let s = 1; s <= S; s++) {
+      const key = `${f}-${s}`;
+      if (slots.has(key)) continue;
+      const p = latticePoint(f, s);
+      const on = key === hover;
+      ctx.fillStyle = `rgba(0,0,0,${0.3 * alpha})`;
+      ctx.beginPath(); ctx.arc(p.x, p.y + 0.5, on ? 4.6 : 2.5, 0, 7); ctx.fill();
+      ctx.fillStyle = fingerColor(f, (on ? 0.95 : 0.45) * alpha, 82);
+      ctx.beginPath(); ctx.arc(p.x, p.y, on ? 3.6 : 1.6, 0, 7); ctx.fill();
+    }
+  }
+  // seconds around the outside, finger counts in the gap before 1s
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.shadowColor = "rgba(0,0,0,0.85)";
+  ctx.shadowBlur = 4;
+  const outer = RING0 + (F - 1) * RING_STEP + 18;
+  ctx.font = `400 10.5px ${displayFont}`;
+  for (let s = 1; s <= S; s++) {
+    const a = -Math.PI / 2 + ((s - 1) / S) * Math.PI * 2;
+    ctx.fillStyle = `rgba(233,234,236,${0.62 * alpha})`;
+    ctx.fillText(`${s}s`, c.x + Math.cos(a) * outer, c.y + Math.sin(a) * outer);
+  }
+  const fa = -Math.PI / 2 - Math.PI / S;
+  ctx.font = `400 9px ${displayFont}`;
+  for (let f = 1; f <= F; f++) {
+    const r = RING0 + (f - 1) * RING_STEP;
+    ctx.fillStyle = fingerColor(f, 0.75 * alpha, 82);
+    ctx.fillText(String(f), c.x + Math.cos(fa) * r, c.y + Math.sin(fa) * r);
   }
   ctx.shadowBlur = 0;
 }
 
-function drawRing(c, elapsed) {
-  const max = state?.maxSeconds ?? 8;
-  const f = touch.fingers || 1;
-  const R = 66;
-  const gap = 0.09;
+function drawRing(c, elapsed, f, R) {
+  const max = maxSeconds();
   const seg = (Math.PI * 2) / max;
   const fired = touch.phase === "fired";
+  ctx.lineCap = "round";
+  ctx.lineWidth = 2.5;
   for (let i = 0; i < max; i++) {
-    const a0 = -Math.PI / 2 + i * seg + gap / 2;
-    const a1 = a0 + seg - gap;
-    ctx.lineCap = "round";
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = "rgba(255,255,255,0.08)";
-    ctx.beginPath();
-    ctx.arc(c.x, c.y, R, a0, a1);
-    ctx.stroke();
-    const fill = fired ? 1 : Math.max(0, Math.min(1, elapsed - i));
+    const a0 = -Math.PI / 2 + i * seg + 0.07;
+    const a1 = a0 + seg - 0.14;
+    ctx.strokeStyle = "rgba(0,0,0,0.3)";
+    ctx.beginPath(); ctx.arc(c.x, c.y + 1, R, a0, a1); ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,0.16)";
+    ctx.beginPath(); ctx.arc(c.x, c.y, R, a0, a1); ctx.stroke();
+    const fill = fired ? 1 : clamp01(elapsed - i);
     if (fill > 0) {
-      ctx.strokeStyle = fingerColor(f, fired ? burst : 1);
-      ctx.shadowColor = fingerColor(f, 0.8);
-      ctx.shadowBlur = 8;
-      ctx.beginPath();
-      ctx.arc(c.x, c.y, R, a0, a0 + (a1 - a0) * fill);
-      ctx.stroke();
-      ctx.shadowBlur = 0;
+      ctx.strokeStyle = fingerColor(f, fired ? burst : 0.95, 84);
+      ctx.beginPath(); ctx.arc(c.x, c.y, R, a0, a0 + (a1 - a0) * fill); ctx.stroke();
     }
   }
 }
 
-function pinPositions() {
-  const map = new Map();
-  for (const row of rowsEl.querySelectorAll(".row")) {
-    const r = row.querySelector(".pin").getBoundingClientRect();
-    if (r.bottom < 60 || r.top > size().h - 20) continue; // scrolled out of view
-    map.set(row.dataset.key, { x: r.left + r.width / 2, y: r.top + r.height / 2 });
+// ---------- animation ----------
+
+let last = performance.now();
+let skip = false;
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  const moving = open ? openT < fullyOpen() : openT > 0;
+  const holding = touch.phase === "holding" || touch.phase === "settling";
+  const active = moving || open || holding || burst > 0.01 || mouse || $("readout").classList.contains("show");
+  // At rest the buddy runs at 30fps to stay light on the battery.
+  skip = !skip;
+  if (!active && skip) return;
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  const t = now / 1000;
+
+  // Opening and closing take the same unhurried time.
+  const step = reduced ? 99 : dt;
+  const prevT = openT;
+  openT = open ? Math.min(fullyOpen(), openT + step) : Math.max(0, openT - step);
+  if (!open && prevT > 0 && openT === 0 && (shift.x || shift.y) && !resizing) shrink();
+  if (now > readoutUntil) $("readout").classList.remove("show");
+
+  const { w, h } = view();
+  ctx.clearRect(0, 0, w, h);
+
+  const c = clusterCenter();
+  const counting = touch.phase === "holding";
+  const elapsed = counting ? touch.elapsed + (now - touch.at) / 1000 : 0;
+  const breathe = 1 + Math.sin(t * 1.2) * 0.06;
+  const squeeze = holding ? 0.6 : 1;
+  burst *= Math.pow(0.05, dt);
+  const follow = 1 - Math.exp(-dt * 5);
+
+  drawDial(clamp01((openT - TRAVEL * 0.5) / 0.6));
+
+  // Living positions: each dot orbits, wobbles, breathes, hops now and then,
+  // and leans a little toward the cursor.
+  const live = (d, amp) => {
+    d.angle += d.speed * dt * (holding ? 3 : 1);
+    if (t > d.hopAt) d.hopAt = t + 4 + Math.random() * 9;
+    const sinceHop = t - (d.hopAt - 4);
+    const hop = reduced ? 0 : Math.max(0, Math.sin(Math.min(1, Math.max(0, sinceHop / 0.45)) * Math.PI)) * (sinceHop < 0.45 ? 1 : 0);
+    const wob = reduced ? 0 : Math.sin(t * 1.7 + d.seed) * 4 * amp + Math.sin(t * 0.6 + d.seed * 2) * 3 * amp;
+    const r = (d.orbit * breathe + wob) * squeeze * (1 + burst * 0.8);
+    let x = c.x + Math.cos(d.angle) * r;
+    let y = c.y + Math.sin(d.angle) * r * 0.88 - hop * 6;
+    if (mouse && !open) { x += (mouse.x - x) * 0.07; y += (mouse.y - y) * 0.07; }
+    d.lx += (x - d.lx) * follow;
+    d.ly += (y - d.ly) * follow;
+    return { x: d.lx, y: d.ly };
+  };
+
+  const dustAlpha = (1 - clamp01(openT / 0.5)) * 0.8;
+  for (const d of dust) {
+    const p = live(d, 1.2);
+    if (dustAlpha < 0.02) continue;
+    ctx.fillStyle = `rgba(0,0,0,${dustAlpha * 0.4})`;
+    ctx.beginPath(); ctx.arc(p.x, p.y + 0.5, d.size + 0.8, 0, 7); ctx.fill();
+    ctx.fillStyle = `rgba(222,225,230,${dustAlpha})`;
+    ctx.beginPath(); ctx.arc(p.x, p.y, d.size, 0, 7); ctx.fill();
   }
-  return map;
+
+  for (const d of dots) {
+    const home = live(d, 1);
+    const k = progress(d.f);
+    const L = latticePoint(d.f, d.s);
+    const j = reduced ? 0 : 1.2;
+    const lx = L.x + Math.sin(t * 2.1 + d.seed) * j;
+    const ly = L.y + Math.cos(t * 1.8 + d.seed) * j;
+    d.x = home.x + (lx - home.x) * k;
+    d.y = home.y + (ly - home.y) * k;
+    const litTarget = holding && touch.fingers ? (d.f === touch.fingers ? 1.5 : 0.45) : d.key === hover ? 1.6 : 1;
+    d.lit += (litTarget - d.lit) * follow;
+    const size = (4.6 + Math.min(d.s, 8) * 0.3) * (1 - 0.22 * k) * (d.key === hover ? 1.25 : 1);
+    bead(d.x, d.y, size, d.f, Math.min(1, 0.55 + 0.45 * d.lit), d.lit);
+  }
+
+  if (counting || touch.phase === "fired") {
+    if (openT > 0) {
+      if (counting && elapsed >= 1) {
+        const p = latticePoint(touch.fingers, Math.min(maxSeconds(), Math.floor(elapsed)));
+        ctx.strokeStyle = fingerColor(touch.fingers, 0.9, 86);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(p.x, p.y, 9 + (elapsed % 1) * 4, 0, 7); ctx.stroke();
+      }
+    } else {
+      drawRing(c, elapsed, touch.fingers || 1, 88);
+    }
+  }
 }
 
 applyState(await invoke("get_state"));

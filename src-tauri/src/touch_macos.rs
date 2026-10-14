@@ -77,12 +77,31 @@ struct Api {
 
 static DEVICES: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 
+/// Run with TOUCHROUTE_DEBUG=1 to print every change in what the trackpad
+/// reports: raw contacts, their states, and how many we count.
+static DEBUG: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| std::env::var_os("TOUCHROUTE_DEBUG").is_some());
+static LAST_DEBUG: Mutex<String> = Mutex::new(String::new());
+
+fn debug_frame(device: usize, fingers: &[Finger]) {
+    let states: Vec<String> = fingers.iter().map(|f| format!("{}:{}", f.identifier, f.state)).collect();
+    let counted = fingers.iter().filter(|f| f.state == MAKE_TOUCH || f.state == TOUCHING).count();
+    let line = format!("device {device:#x}  raw {}  counted {counted}  [{}]", fingers.len(), states.join(" "));
+    let mut last = LAST_DEBUG.lock().unwrap();
+    if *last != line {
+        eprintln!("{line}");
+        *last = line;
+    }
+}
+
 extern "C" fn on_frame(device: *mut c_void, data: *const Finger, count: c_int, _ts: f64, _frame: c_int) -> c_int {
     let fingers: &[Finger] = if data.is_null() || count <= 0 {
         &[]
     } else {
         unsafe { std::slice::from_raw_parts(data, count as usize) }
     };
+    if *DEBUG {
+        debug_frame(device as usize, fingers);
+    }
     let touches: Vec<Touch> = fingers
         .iter()
         .filter(|f| f.state == MAKE_TOUCH || f.state == TOUCHING)

@@ -2,9 +2,11 @@
 import math, colorsys
 from PIL import Image, ImageDraw, ImageFilter
 
-def hue(f):  # same finger-count spectrum the app uses
-    h = ((188 + (f - 1) * 19) % 360) / 360
-    r, g, b = colorsys.hls_to_rgb(h, 0.68, 0.95)
+TONES = [(210, 26), (186, 24), (150, 18), (92, 18), (42, 32), (22, 32), (6, 26), (220, 6), (32, 14), (200, 10)]
+
+def hue(f):  # same muted finger tones the app uses
+    h, s = TONES[(f - 1) % 10]
+    r, g, b = colorsys.hls_to_rgb(h / 360, 0.76, s / 100)
     return int(r * 255), int(g * 255), int(b * 255)
 
 S = 1024
@@ -27,7 +29,7 @@ for i in range(9):  # inner swarm
     r = 52 * math.sqrt(i + 1)
     ring.append((cx + math.cos(a) * r * 0.9, cy + 70 + math.sin(a) * r * 0.55, 15 + (i % 3) * 5, hue(i + 1)))
 for x, y, r, c in ring:
-    gd.ellipse((x - r * 2.2, y - r * 2.2, x + r * 2.2, y + r * 2.2), fill=c + (120,))
+    gd.ellipse((x - r * 2.2, y - r * 2.2, x + r * 2.2, y + r * 2.2), fill=c + (70,))
     dd.ellipse((x - r, y - r, x + r, y + r), fill=c + (255,))
 glow = glow.filter(ImageFilter.GaussianBlur(40))
 layer = Image.alpha_composite(glow, dots)

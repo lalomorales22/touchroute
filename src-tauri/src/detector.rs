@@ -1,8 +1,13 @@
 // Turns raw touch frames into "N fingers held still for S seconds".
 //
-// Fingers land, the count settles, and the timer runs while every finger
-// stays put. Lifting fires the slot for the whole seconds held. Moving
-// (scrolling, dragging) or holding past the last second cancels.
+// 1. Settling: fingers land one at a time, so we wait until the count has
+//    stayed the same for SETTLE seconds. Moving doesn't cancel yet.
+// 2. Holding: the count is locked and the seconds start. Every finger must
+//    stay put; drifting (a scroll or drag) cancels. Another finger landing
+//    goes back to settling with the new count.
+// 3. Releasing: the first finger lifting ends the hold. If the count comes
+//    back within FLICKER, it was a finger blinking out, so holding resumes.
+//    When every finger is up, the slot for the whole seconds held fires.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -28,9 +33,10 @@ pub struct TouchEvent {
     pub slot: Option<String>,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 enum Phase {
     Idle,
+    Settling,
     Holding,
     Releasing,
     Cancelled,
@@ -38,17 +44,23 @@ enum Phase {
 
 struct State {
     phase: Phase,
-    start: Instant,
-    held: f64,
+    /// When the current finger count was reached (settling) or locked (holding).
+    since: Instant,
+    /// When the first finger lifted, while releasing.
+    lift: Instant,
     fingers: usize,
     anchors: HashMap<i32, (f32, f32)>,
     per_device: HashMap<usize, Vec<Touch>>,
     last_emit: Option<Instant>,
 }
 
+/// The finger count must hold steady this long before the seconds start.
+const SETTLE: f64 = 0.8;
 /// How far (as a fraction of the trackpad) a finger may drift before the hold
 /// counts as a scroll or drag.
-const MOVE_LIMIT: f32 = 0.035;
+const MOVE_LIMIT: f32 = 0.05;
+/// A finger that drops out and comes back within this long never left.
+const FLICKER: f64 = 0.3;
 /// Fingers rarely lift together; give them this long to finish.
 const RELEASE_GRACE: f64 = 1.2;
 pub const MAX_SECONDS: u32 = 8;
@@ -77,12 +89,16 @@ fn anchors(touches: &[Touch]) -> HashMap<i32, (f32, f32)> {
     touches.iter().map(|t| (t.id, (t.x, t.y))).collect()
 }
 
+fn secs(a: Instant, b: Instant) -> f64 {
+    b.duration_since(a).as_secs_f64()
+}
+
 pub fn on_frame(device: usize, touches: &[Touch]) {
     let mut guard = STATE.lock().unwrap();
     let s = guard.get_or_insert_with(|| State {
         phase: Phase::Idle,
-        start: Instant::now(),
-        held: 0.0,
+        since: Instant::now(),
+        lift: Instant::now(),
         fingers: 0,
         anchors: HashMap::new(),
         per_device: HashMap::new(),
@@ -94,61 +110,84 @@ pub fn on_frame(device: usize, touches: &[Touch]) {
     let all: Vec<Touch> = s.per_device.values().flatten().copied().collect();
     let n = all.len();
     let now = Instant::now();
-    let elapsed = now.duration_since(s.start).as_secs_f64();
+    let throttle = |s: &mut State| {
+        let due = s.last_emit.map_or(true, |t| now.duration_since(t).as_millis() >= 50);
+        if due {
+            s.last_emit = Some(now);
+        }
+        due
+    };
+    let mut fire: Option<(usize, f64)> = None;
 
     match s.phase {
         Phase::Idle => {
             if n > 0 {
-                s.phase = Phase::Holding;
-                s.start = now;
+                s.phase = Phase::Settling;
+                s.since = now;
                 s.fingers = n;
+                emit("settling", n, 0.0, None);
+            }
+        }
+        Phase::Settling => {
+            if n == 0 {
+                s.phase = Phase::Idle;
+                emit("idle", 0, 0.0, None);
+            } else if n != s.fingers {
+                s.fingers = n;
+                s.since = now;
+                emit("settling", n, 0.0, None);
+            } else if secs(s.since, now) >= SETTLE {
+                s.phase = Phase::Holding;
+                s.since = now;
                 s.anchors = anchors(&all);
                 s.last_emit = Some(now);
                 emit("holding", n, 0.0, None);
+            } else if throttle(s) {
+                emit("settling", n, 0.0, None);
             }
         }
         Phase::Holding => {
+            let elapsed = secs(s.since, now);
             if n == 0 {
-                s.held = elapsed;
-                let (f, held) = (s.fingers, s.held);
+                fire = Some((s.fingers, elapsed));
                 s.phase = Phase::Idle;
-                drop(guard);
-                finish(f, held);
             } else if n > s.fingers {
-                // Another finger landed: the count changed, so start over.
+                s.phase = Phase::Settling;
                 s.fingers = n;
-                s.start = now;
-                s.anchors = anchors(&all);
-                emit("holding", n, 0.0, None);
+                s.since = now;
+                emit("settling", n, 0.0, None);
             } else if n < s.fingers {
                 s.phase = Phase::Releasing;
-                s.held = elapsed;
+                s.lift = now;
             } else {
                 let moved = all.iter().any(|t| match s.anchors.get(&t.id) {
                     Some(&(ax, ay)) => (t.x - ax).hypot(t.y - ay) > MOVE_LIMIT,
                     None => false,
                 });
+                // A finger that blinked out comes back with a new id; anchor it fresh.
                 for t in &all {
                     s.anchors.entry(t.id).or_insert((t.x, t.y));
                 }
                 if moved || elapsed >= (MAX_SECONDS + 1) as f64 {
                     s.phase = Phase::Cancelled;
                     emit("cancelled", s.fingers, elapsed, None);
-                } else if s.last_emit.map_or(true, |t| now.duration_since(t).as_millis() >= 50) {
-                    s.last_emit = Some(now);
+                } else if throttle(s) {
                     emit("holding", s.fingers, elapsed, None);
                 }
             }
         }
         Phase::Releasing => {
+            let held = secs(s.since, s.lift);
+            let lifting = secs(s.lift, now);
             if n == 0 {
-                let (f, held) = (s.fingers, s.held);
+                fire = Some((s.fingers, held));
                 s.phase = Phase::Idle;
-                drop(guard);
-                finish(f, held);
-            } else if elapsed - s.held > RELEASE_GRACE {
+            } else if n >= s.fingers && lifting < FLICKER {
+                // Only a blink: carry on as if nothing happened.
+                s.phase = Phase::Holding;
+            } else if lifting > RELEASE_GRACE {
                 s.phase = Phase::Cancelled;
-                emit("cancelled", s.fingers, elapsed, None);
+                emit("cancelled", s.fingers, held, None);
             }
         }
         Phase::Cancelled => {
@@ -157,6 +196,11 @@ pub fn on_frame(device: usize, touches: &[Touch]) {
                 emit("idle", 0, 0.0, None);
             }
         }
+    }
+
+    drop(guard);
+    if let Some((fingers, held)) = fire {
+        finish(fingers, held);
     }
 }
 

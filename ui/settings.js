@@ -251,21 +251,25 @@ function clearLive() {
 listen("touch", ({ payload: p }) => {
   const live = $("live");
   clearLive();
-  if (p.phase === "holding") {
+  if (p.phase === "settling") {
+    grid.querySelector(`.rowhead[data-row="${p.fingers}"]`)?.classList.add("live-row");
+    live.classList.add("on");
+    live.innerHTML = `<b>${p.fingers}</b>${plural(p.fingers, "finger")} down, hold still`;
+  } else if (p.phase === "holding") {
     const sec = Math.floor(p.elapsed);
     grid.querySelector(`.rowhead[data-row="${p.fingers}"]`)?.classList.add("live-row");
     if (sec >= 1) grid.querySelector(`.cell[data-key="${p.fingers}-${sec}"]`)?.classList.add("holding");
     live.classList.add("on");
     live.innerHTML = sec >= 1
-      ? `<b>${slotCode(p.fingers, sec)}</b>  ${state.config.slots[`${p.fingers}-${sec}`]?.name ?? "nothing here yet"}`
-      : `<b>${p.fingers}</b>  ${plural(p.fingers, "finger")} down`;
+      ? `<b>${slotCode(p.fingers, sec)}</b>${state.config.slots[`${p.fingers}-${sec}`]?.name ?? "nothing here yet"}`
+      : `<b>${p.fingers}</b>${plural(p.fingers, "finger")} down`;
   } else if (p.phase === "fired" || p.phase === "empty") {
     const cell = grid.querySelector(`.cell[data-key="${p.slot}"]`);
     if (cell) { cell.classList.remove("flash"); void cell.offsetWidth; cell.classList.add("flash"); }
     const [f, s] = parseKey(p.slot);
     live.innerHTML = p.phase === "fired"
-      ? `<b>${slotCode(f, s)}</b>  ran ${state.config.slots[p.slot]?.name ?? ""}`
-      : `<b>${slotCode(f, s)}</b>  nothing here yet. Click it to set it up.`;
+      ? `<b>${slotCode(f, s)}</b>ran ${state.config.slots[p.slot]?.name ?? ""}`
+      : `<b>${slotCode(f, s)}</b>nothing here yet. Click it to set it up.`;
   } else if (p.phase === "cancelled") {
     live.innerHTML = "Cancelled: fingers moved or held too long";
   } else {

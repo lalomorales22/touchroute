@@ -1,17 +1,19 @@
-/* Shared by the buddy and settings. Each finger count has its own color on a
-   cool-to-warm spectrum, so a dot's color tells you how many fingers it takes. */
+/* Shared by the buddy and settings. Each finger count has its own soft tone,
+   steel through sage and sand to clay, so a dot's color tells you how many
+   fingers it takes. No neon. */
 :root {
   color-scheme: dark;
   --void: #000000;
-  --raised: rgba(255, 255, 255, 0.045);
-  --raised-hi: rgba(255, 255, 255, 0.08);
-  --line: rgba(255, 255, 255, 0.09);
-  --line-hi: rgba(255, 255, 255, 0.18);
-  --text: #f2f1f7;
-  --dim: #8c8b99;
-  --faint: #55545f;
-  --danger: #ff6b81;
-  --round: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
+  --raised: rgba(255, 255, 255, 0.04);
+  --raised-hi: rgba(255, 255, 255, 0.075);
+  --line: rgba(255, 255, 255, 0.085);
+  --line-hi: rgba(255, 255, 255, 0.17);
+  --text: #e9eaec;
+  --platinum: #d6d9de;
+  --dim: #8b8e94;
+  --faint: #55585e;
+  --danger: #d08a80;
+  --display: "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
 }
@@ -20,7 +22,7 @@
 
 button { font: inherit; color: inherit; }
 
-:focus-visible { outline: 2px solid hsl(230 95% 72%); outline-offset: 2px; }
+:focus-visible { outline: 1.5px solid rgba(255, 255, 255, 0.55); outline-offset: 2px; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }

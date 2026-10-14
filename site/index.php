@@ -15,7 +15,7 @@ $h = fn($s) => htmlspecialchars($s, ENT_QUOTES);
 <meta name="description" content="Hold fingers on your trackpad for a few seconds and let go. TouchRoute opens apps, runs scripts, and starts Claude. Set it up by describing what you want.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@200..600&display=swap" rel="stylesheet">
 <style>
   :root {
     --void: #000;
@@ -24,7 +24,7 @@ $h = fn($s) => htmlspecialchars($s, ENT_QUOTES);
     --text: #f2f1f7;
     --dim: #9897a6;
     --faint: #5c5b68;
-    --display: "Bricolage Grotesque", -apple-system, system-ui, sans-serif;
+    --display: "Geist", -apple-system, system-ui, sans-serif;
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     color-scheme: dark;
@@ -33,11 +33,11 @@ $h = fn($s) => htmlspecialchars($s, ENT_QUOTES);
   html { background: var(--void); }
   body { margin: 0; background: var(--void); color: var(--text); font: 17px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
   a { color: inherit; }
-  :focus-visible { outline: 2px solid hsl(230 95% 72%); outline-offset: 3px; border-radius: 6px; }
+  :focus-visible { outline: 2px solid rgba(255,255,255,.6); outline-offset: 3px; border-radius: 6px; }
   .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
 
   nav { display: flex; align-items: center; justify-content: space-between; height: 72px; }
-  .brand { display: flex; align-items: center; gap: 10px; font: 700 19px/1 var(--display); text-decoration: none; }
+  .brand { display: flex; align-items: center; gap: 10px; font: 500 18px/1 var(--display); text-decoration: none; }
   .mark { position: relative; width: 24px; height: 17px; }
   .mark i { position: absolute; width: 6px; height: 6px; border-radius: 50%; }
   nav a.gh { color: var(--dim); text-decoration: none; font-size: 15px; }
@@ -46,8 +46,7 @@ $h = fn($s) => htmlspecialchars($s, ENT_QUOTES);
   /* ---------- hero ---------- */
   .hero { display: grid; grid-template-columns: 1fr 1.05fr; gap: 56px; align-items: center; padding: 56px 0 96px; }
   h1 {
-    font: 800 clamp(44px, 6.4vw, 84px)/0.95 var(--display); letter-spacing: -0.035em; margin: 0;
-    font-variation-settings: "opsz" 96;
+    font: 300 clamp(42px, 6vw, 78px)/1 var(--display); letter-spacing: -0.035em; margin: 0;
   }
   .hero p { color: var(--dim); font-size: 19px; max-width: 30em; margin: 24px 0 32px; }
   .cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
@@ -56,7 +55,7 @@ $h = fn($s) => htmlspecialchars($s, ENT_QUOTES);
     font: 600 16px/1 var(--sans); text-decoration: none; border: 1px solid var(--line);
     background: none; color: var(--text); cursor: pointer;
   }
-  .btn.main { background: var(--text); color: #000; border-color: transparent; }
+  .btn.main { background: #d6d9de; color: #000; border-color: transparent; }
   .btn.main:hover { background: #fff; }
   .btn.ghost:hover { background: var(--raised); }
   .soon-note { margin-top: 16px; font-size: 14px; color: var(--faint); }
@@ -86,7 +85,7 @@ $h = fn($s) => htmlspecialchars($s, ENT_QUOTES);
 
   /* ---------- sections ---------- */
   section.band { padding: 96px 0; border-top: 1px solid var(--line); }
-  h2 { font: 700 clamp(32px, 4.2vw, 52px)/1.02 var(--display); letter-spacing: -0.03em; margin: 0 0 16px; }
+  h2 { font: 300 clamp(30px, 4vw, 48px)/1.05 var(--display); letter-spacing: -0.03em; margin: 0 0 16px; }
   .sub { color: var(--dim); max-width: 36em; margin: 0 0 48px; font-size: 18px; }
 
   .gridzone { display: grid; grid-template-columns: auto 1fr; gap: 56px; align-items: start; }
@@ -97,7 +96,7 @@ $h = fn($s) => htmlspecialchars($s, ENT_QUOTES);
   .matrix .c.set::after { content: ""; position: absolute; inset: 11px; border-radius: 50%; background: var(--k); box-shadow: 0 0 12px var(--k); }
   .matrix .c:hover, .matrix .c.focus { border-color: var(--k); border-style: solid; }
   .readout { position: sticky; top: 24px; }
-  .readout .code { font: 800 clamp(72px, 10vw, 128px)/0.9 var(--display); letter-spacing: -0.04em; transition: color .2s; }
+  .readout .code { font: 200 clamp(72px, 10vw, 128px)/0.9 var(--display); letter-spacing: -0.04em; transition: color .2s; }
   .readout .what { font-size: 20px; margin-top: 12px; min-height: 2.6em; }
   .readout .meta { color: var(--dim); font-size: 15px; }
   .legend { margin-top: 32px; display: grid; gap: 10px; color: var(--dim); font-size: 15px; }
@@ -105,8 +104,8 @@ $h = fn($s) => htmlspecialchars($s, ENT_QUOTES);
 
   .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; list-style: none; padding: 0; margin: 0; counter-reset: s; }
   .steps li { border: 1px solid var(--line); border-radius: 20px; padding: 28px; background: var(--raised); counter-increment: s; }
-  .steps li::before { content: counter(s); font: 800 44px/1 var(--display); color: var(--faint); display: block; margin-bottom: 20px; }
-  .steps h3 { font: 700 22px/1.15 var(--display); margin: 0 0 10px; letter-spacing: -0.01em; }
+  .steps li::before { content: counter(s); font: 200 44px/1 var(--display); color: var(--faint); display: block; margin-bottom: 20px; }
+  .steps h3 { font: 500 22px/1.15 var(--display); margin: 0 0 10px; letter-spacing: -0.01em; }
   .steps p { color: var(--dim); margin: 0; font-size: 16px; }
   .say { margin-top: 18px; font: 14px/1.45 var(--mono); background: #0b0b10; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; color: var(--text); }
 
@@ -122,15 +121,15 @@ $h = fn($s) => htmlspecialchars($s, ENT_QUOTES);
   .bd.open .shell { left: 0; top: 0; width: 300px; height: 360px; border-radius: 22px; }
   .bd .rows { position: absolute; left: 22px; top: 22px; right: 22px; opacity: 0; transition: opacity .3s; font-size: 14px; }
   .bd.open .rows { opacity: 1; transition-delay: .25s; }
-  .bd .rows strong { display: block; font: 700 16px/1 var(--display); margin-bottom: 16px; }
+  .bd .rows strong { display: block; font: 500 16px/1 var(--display); margin-bottom: 16px; }
   .bd .row { display: grid; grid-template-columns: 20px 40px 1fr; height: 34px; align-items: center; }
-  .bd .row span:nth-child(2) { font: 700 14px/1 var(--display); color: var(--dim); }
+  .bd .row span:nth-child(2) { font: 500 14px/1 var(--display); color: var(--dim); }
   .toggle { margin-top: 28px; }
 
   .install { display: grid; grid-template-columns: 1.3fr 1fr; gap: 20px; align-items: start; }
   .install > * { min-width: 0; }
   .card { border: 1px solid var(--line); border-radius: 20px; padding: 28px; background: var(--raised); }
-  .card h3 { font: 700 22px/1.1 var(--display); margin: 0 0 8px; }
+  .card h3 { font: 500 22px/1.1 var(--display); margin: 0 0 8px; }
   .card p { color: var(--dim); margin: 0 0 18px; font-size: 16px; }
   .cmd { display: flex; align-items: center; gap: 10px; background: #000; border: 1px solid var(--line); border-radius: 12px; padding: 6px 6px 6px 16px; }
   .cmd code { flex: 1; min-width: 0; font: 13.5px/1.4 var(--mono); overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
@@ -160,7 +159,7 @@ $h = fn($s) => htmlspecialchars($s, ENT_QUOTES);
 <div class="wrap">
   <nav>
     <a class="brand" href="#"><span class="mark" aria-hidden="true">
-      <i style="left:0;top:10px;background:hsl(188 95% 68%)"></i><i style="left:4px;top:3px;background:hsl(226 95% 68%)"></i><i style="left:9px;top:0;background:hsl(264 95% 68%)"></i><i style="left:14px;top:3px;background:hsl(302 95% 68%)"></i><i style="left:18px;top:10px;background:hsl(340 95% 68%)"></i>
+      <i style="left:0;top:10px;background:hsl(210 26% 76%)"></i><i style="left:4px;top:3px;background:hsl(186 24% 76%)"></i><i style="left:9px;top:0;background:hsl(150 18% 76%)"></i><i style="left:14px;top:3px;background:hsl(92 18% 76%)"></i><i style="left:18px;top:10px;background:hsl(42 32% 76%)"></i>
     </span>TouchRoute</a>
     <a class="gh" href="<?= $h($github) ?>">GitHub</a>
   </nav>
@@ -275,8 +274,9 @@ $h = fn($s) => htmlspecialchars($s, ENT_QUOTES);
 </div>
 
 <script>
-const hue = (f) => (188 + (f - 1) * 19) % 360;
-const col = (f, a = 1) => `hsla(${hue(f)}, 95%, 68%, ${a})`;
+// The same muted finger tones as the app: steel, teal, sage, olive, sand, clay...
+const TONES = [[210, 26], [186, 24], [150, 18], [92, 18], [42, 32], [22, 32], [6, 26], [220, 6], [32, 14], [200, 10]];
+const col = (f, a = 1, l = 76) => { const [h, s] = TONES[(f - 1) % 10]; return `hsla(${h}, ${s}%, ${l}%, ${a})`; };
 const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 function fit(canvas) {
@@ -327,7 +327,7 @@ function fit(canvas) {
     // count
     const n = lifted ? 5 : Math.min(5, Math.floor(held));
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.font = `800 ${Math.round(R * .62)}px "Bricolage Grotesque", sans-serif`;
+    ctx.font = `200 ${Math.round(R * .62)}px "Geist", sans-serif`;
     ctx.fillStyle = t < LAND ? "rgba(255,255,255,.12)" : lifted ? col(5) : "#f2f1f7";
     ctx.fillText(t < LAND ? "·" : `5·${Math.max(n, 0)}`, cx, cy + R * .78);
     // terminal
@@ -403,7 +403,7 @@ function fit(canvas) {
       }
       d.x += (tx - d.x) * ease; d.y += (ty - d.y) * ease; d.al += (ta - d.al) * ease;
       if (d.al < .02) continue;
-      ctx.fillStyle = d.f ? col(d.f, d.al) : `hsla(${hue(1 + d.i % 10)},40%,75%,${d.al * .55})`;
+      ctx.fillStyle = d.f ? col(d.f, d.al) : `rgba(222,225,230,${d.al * .6})`;
       ctx.shadowColor = d.f ? col(d.f, .9) : "transparent"; ctx.shadowBlur = d.f ? 10 : 0;
       ctx.beginPath(); ctx.arc(d.x, d.y, d.f ? 4.6 : 1.8, 0, 7); ctx.fill();
     }

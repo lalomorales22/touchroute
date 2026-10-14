@@ -16,7 +16,7 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder, Windo
 
 pub static APP: OnceLock<AppHandle> = OnceLock::new();
 
-const BUDDY_SIZE: f64 = 168.0;
+const BUDDY_SIZE: f64 = 200.0;
 
 fn config_changed(app: &AppHandle) {
     let _ = app.emit("config", state_json());

@@ -2,7 +2,8 @@
 //
 // 1. Settling: fingers land one at a time, so we wait until the count has
 //    stayed the same for SETTLE seconds. Moving doesn't cancel yet.
-// 2. Holding: the count is locked and the seconds start. Every finger must
+// 2. Holding: the count is locked. Seconds are measured from when that
+//    count landed. Every finger must
 //    stay put; drifting (a scroll or drag) cancels. Another finger landing
 //    goes back to settling with the new count.
 // 3. Releasing: the first finger lifting ends the hold. If the count comes
@@ -54,8 +55,9 @@ struct State {
     last_emit: Option<Instant>,
 }
 
-/// The finger count must hold steady this long before the seconds start.
-const SETTLE: f64 = 0.8;
+/// The finger count must hold steady this long before it's trusted. Time spent
+/// settling still counts toward the seconds.
+const SETTLE: f64 = 0.3;
 /// How far (as a fraction of the trackpad) a finger may drift before the hold
 /// counts as a scroll or drag.
 const MOVE_LIMIT: f32 = 0.05;
@@ -137,11 +139,12 @@ pub fn on_frame(device: usize, touches: &[Touch]) {
                 s.since = now;
                 emit("settling", n, 0.0, None);
             } else if secs(s.since, now) >= SETTLE {
+                // The clock started when this count landed, not now, so the
+                // seconds match what the user is counting in their head.
                 s.phase = Phase::Holding;
-                s.since = now;
                 s.anchors = anchors(&all);
                 s.last_emit = Some(now);
-                emit("holding", n, 0.0, None);
+                emit("holding", n, secs(s.since, now), None);
             } else if throttle(s) {
                 emit("settling", n, 0.0, None);
             }

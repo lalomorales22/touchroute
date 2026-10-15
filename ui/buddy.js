@@ -19,6 +19,11 @@ const $ = (id) => document.getElementById(id);
 const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const displayFont = getComputedStyle(document.documentElement).getPropertyValue("--display");
 
+// While touches are paused the buddy is just its dots: no counting ring, no
+// readout, no reacting to fingers. Resuming brings all of that back.
+const paused = () => state && !state.config.enabled;
+const IDLE = { phase: "idle", fingers: 0, elapsed: 0, slot: null, at: 0 };
+
 let state = null;
 let slots = new Map();   // key -> { f, s, name }
 let dots = [];           // living dots, one per touch
@@ -32,11 +37,6 @@ let mouse = null;        // cursor position, for the dots to lean toward
 let touch = { ...IDLE };
 let burst = 0;
 let readoutUntil = 0;
-
-// While touches are paused the buddy is just its dots: no counting ring, no
-// readout, no reacting to fingers. Resuming brings all of that back.
-const paused = () => state && !state.config.enabled;
-const IDLE = { phase: "idle", fingers: 0, elapsed: 0, slot: null, at: 0 };
 
 // ---------- data ----------
 

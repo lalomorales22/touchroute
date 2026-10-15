@@ -181,4 +181,4 @@ osascript -e 'tell application "Spotify" to play'
 - **Nothing happens when the user holds fingers:** check `"enabled": true` in `config.json`, and that the TouchRoute app is running (on macOS, `pgrep -x touchroute`). The fingers must stay still: moving them counts as a scroll and cancels the touch.
 - **The touch fires but does nothing:** read `~/.touchroute/logs/N-S.log`. The first time a script controls Terminal or another app, macOS asks the user to allow it. Tell them to click Allow.
 - **The wrong touch fires:** the user may be lifting late or early. The seconds count from when the fingers land, and the desktop buddy shows the live count, so suggest they watch it.
-- **The trackpad isn't detected** (for example, one plugged in after launch): the menu bar icon has a **Reconnect trackpad** item.
+- **The trackpad isn't detected** (for example, one plugged in after launch): TouchRoute looks for trackpads again every minute and after the Mac wakes, so wait a minute. If it still isn't seen, quit TouchRoute from the menu bar and open it again.

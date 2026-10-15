@@ -133,11 +133,6 @@ async fn install_update(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-fn reconnect() -> Result<usize, String> {
-    start_touch()
-}
-
 fn start_touch() -> Result<usize, String> {
     #[cfg(target_os = "macos")]
     return touch_macos::start();
@@ -225,10 +220,9 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let settings = MenuItem::with_id(app, "settings", "Settings…", true, Some("CmdOrCtrl+,"))?;
     let buddy = MenuItem::with_id(app, "buddy", "Show or hide buddy", true, None::<&str>)?;
     let pause = MenuItem::with_id(app, "pause", "Pause or resume touches", true, None::<&str>)?;
-    let reconnect = MenuItem::with_id(app, "reconnect", "Reconnect trackpad", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit TouchRoute", true, Some("CmdOrCtrl+Q"))?;
     let sep = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&settings, &buddy, &pause, &reconnect, &sep, &quit])?;
+    let menu = Menu::with_items(app, &[&settings, &buddy, &pause, &sep, &quit])?;
 
     TrayIconBuilder::with_id("main")
         .icon(tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?)
@@ -241,9 +235,6 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             "pause" => {
                 config::update(|c| c.enabled = !c.enabled);
                 config_changed(app);
-            }
-            "reconnect" => {
-                let _ = start_touch();
             }
             "quit" => app.exit(0),
             _ => {}
@@ -291,7 +282,6 @@ fn main() {
             set_enabled,
             open_settings,
             open_folder,
-            reconnect,
             check_update,
             add_fun_pack,
             clear_all,

@@ -29,14 +29,24 @@ let resizing = false;
 let shift = { x: 0, y: 0 };
 let hover = null;        // dial spot under the cursor
 let mouse = null;        // cursor position, for the dots to lean toward
-let touch = { phase: "idle", fingers: 0, elapsed: 0, slot: null, at: 0 };
+let touch = { ...IDLE };
 let burst = 0;
 let readoutUntil = 0;
+
+// While touches are paused the buddy is just its dots: no counting ring, no
+// readout, no reacting to fingers. Resuming brings all of that back.
+const paused = () => state && !state.config.enabled;
+const IDLE = { phase: "idle", fingers: 0, elapsed: 0, slot: null, at: 0 };
 
 // ---------- data ----------
 
 function applyState(s) {
   state = s;
+  if (paused()) {
+    touch = { ...IDLE };
+    burst = 0;
+    readoutUntil = 0;
+  }
   slots = new Map(Object.entries(s.config.slots).map(([key, v]) => {
     const [f, sec] = parseKey(key);
     return [key, { f, s: sec, name: v.name }];
@@ -228,6 +238,7 @@ function showReadout(code, label, ms) {
 }
 
 listen("touch", ({ payload: p }) => {
+  if (paused()) return;
   touch = { ...p, at: performance.now() };
   const name = (key) => slots.get(key)?.name;
   if (p.phase === "settling") {

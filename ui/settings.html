@@ -13,6 +13,9 @@
       TouchRoute
     </div>
     <div class="live" id="live" data-tauri-drag-region>Put fingers on your trackpad to see them here</div>
+    <button type="button" class="update" id="update" hidden>
+      <span class="dot" aria-hidden="true"></span><span id="updateText"></span>
+    </button>
     <label class="switch">
       <input type="checkbox" id="enabled">
       <span class="track"><span class="knob"></span></span>
@@ -28,6 +31,11 @@
         <div class="grid" id="grid" role="grid" aria-label="Touch slots"></div>
       </div>
       <p class="note" id="note"></p>
+      <div class="board-foot">
+        <button type="button" class="btn" id="funPack">Add fun pack</button>
+        <button type="button" class="btn quiet" id="clearAll">Clear all</button>
+        <span class="status" id="boardStatus" role="status"></span>
+      </div>
     </section>
 
     <aside class="editor" id="editor">

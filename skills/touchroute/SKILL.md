@@ -93,6 +93,7 @@ Scripts run in the background in a login shell (`zsh -l` on macOS), from the hom
 - **Never start `claude` (or any tool that scans its folder) in the home folder.** A new Terminal window opens in `~`, and scanning it makes macOS ask for access to Photos, Music, Google Drive and so on. Always `cd` first: into the project the user named, or `~/claude` (create it with `mkdir -p ~/claude` if missing) as a neutral default.
 - **Apps:** `open -a "Spotify"`. **Websites:** `open "https://example.com"`. **Files and folders:** `open ~/Documents/plan.md`.
 - **Several agents or tasks at once:** give each its own Terminal window (one `do script` per window), or background quick commands with `&`.
+- **Emoji effects:** TouchRoute ships `~/.touchroute/fun/fx.js`, which animates emoji over the screen for a few seconds (clicks pass through). `osascript -l JavaScript ~/.touchroute/fun/fx.js MODE "🎉 🎊 ✨" ["caption"]`, where MODE is `pop`, `spin`, `rain`, `burst`, `fireworks`, `float`, `launch` or `banner` (banner needs the text). Pair it with a sound: `afplay /System/Library/Sounds/Glass.aiff &`.
 - **Notifications:** `osascript -e 'display notification "Deployed" with title "TouchRoute"'`.
 - Never use `sudo`. Never delete, overwrite or move the user's files unless they explicitly asked for that touch to do it.
 - Never put passwords, tokens or keys in a script. If the touch needs one, read it from where the user already keeps it (an environment variable, the keychain via `security find-generic-password`, or a CLI that's already logged in).
@@ -139,29 +140,29 @@ APPLESCRIPT
 # Open one Terminal window per project, each running Claude Code.
 for project in ~/code/site ~/code/api ~/code/app; do
   osascript - "cd ${(q)project} && claude" <<'APPLESCRIPT'
-  on run argv
-    set cmd to item 1 of argv
-    set wasRunning to application "Terminal" is running
-    tell application "Terminal"
-      activate
-      if wasRunning then
-        do script cmd
+on run argv
+  set cmd to item 1 of argv
+  set wasRunning to application "Terminal" is running
+  tell application "Terminal"
+    activate
+    if wasRunning then
+      do script cmd
+    else
+      -- Terminal opens its own window when it launches. Reuse it,
+      -- or the user ends up with two windows.
+      repeat 50 times
+        if (count of windows) > 0 then exit repeat
+        delay 0.1
+      end repeat
+      if (count of windows) > 0 then
+        do script cmd in window 1
       else
-        -- Terminal opens its own window when it launches. Reuse it,
-        -- or the user ends up with two windows.
-        repeat 50 times
-          if (count of windows) > 0 then exit repeat
-          delay 0.1
-        end repeat
-        if (count of windows) > 0 then
-          do script cmd in window 1
-        else
-          do script cmd
-        end if
+        do script cmd
       end if
-    end tell
-  end run
-  APPLESCRIPT
+    end if
+  end tell
+end run
+APPLESCRIPT
 done
 ```
 

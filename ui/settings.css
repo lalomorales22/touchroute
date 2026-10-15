@@ -37,6 +37,17 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 
 main { flex: 1; display: grid; grid-template-columns: 1fr 400px; min-height: 0; }
 
+.update {
+  display: flex; align-items: center; gap: 8px; border: 1px solid var(--line-hi); background: var(--raised-hi);
+  border-radius: 999px; padding: 6px 12px; font-size: 12.5px; font-weight: 500; color: var(--text); cursor: pointer;
+}
+.update[hidden] { display: none; }
+.update:hover { background: rgba(255,255,255,0.12); }
+.update:disabled { cursor: progress; opacity: 0.7; }
+.update .dot { width: 7px; height: 7px; border-radius: 50%; background: hsl(150 18% 76%); }
+.update.working .dot { animation: pulse 900ms ease-in-out infinite; }
+.update.err .dot { background: var(--danger); }
+
 /* ---------- the board ---------- */
 .board { padding: 34px 40px; overflow: auto; }
 .board h1 { margin: 0; font: 300 28px/1.15 var(--display); letter-spacing: -0.01em; }
@@ -88,6 +99,9 @@ main { flex: 1; display: grid; grid-template-columns: 1fr 400px; min-height: 0; 
 .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 
 .note { color: var(--faint); font-size: 12.5px; margin-top: 22px; max-width: 60ch; }
+.board-foot { display: flex; align-items: center; gap: 10px; margin-top: 18px; }
+.board-foot .btn.quiet { margin-left: 0; }
+.board-foot .btn.quiet.armed { color: var(--danger); border-color: var(--danger); }
 
 /* ---------- editor ---------- */
 .editor { border-left: 1px solid var(--line); overflow: auto; padding: 30px 28px; }

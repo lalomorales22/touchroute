@@ -1,4 +1,4 @@
-import { invoke, listen, fingerColor, slotKey, parseKey, slotCode, plural } from "./shared.js";
+import { invoke, listen, win, currentMonitor, LogicalSize, fingerColor, slotKey, parseKey, slotCode, plural } from "./shared.js";
 
 const SOON = [9, 10];
 const $ = (id) => document.getElementById(id);
@@ -181,7 +181,30 @@ $("ask").onclick = async () => {
 // ---------- quick starts (no AI needed) ----------
 
 const shq = (s) => `"${s.replace(/(["\\$`])/g, "\\$1")}"`;
-const asq = (s) => s.replace(/(["\\])/g, "\\$1");
+
+// Runs its argument in Terminal, reusing the window Terminal opens when it
+// launches so you don't get two.
+const TERMINAL = `on run argv
+  set cmd to item 1 of argv
+  set wasRunning to application "Terminal" is running
+  tell application "Terminal"
+    activate
+    if wasRunning then
+      do script cmd
+    else
+      repeat 50 times
+        if (count of windows) > 0 then exit repeat
+        delay 0.1
+      end repeat
+      if (count of windows) > 0 then
+        do script cmd in window 1
+      else
+        do script cmd
+      end if
+    end if
+  end tell
+end run
+`;
 
 const QUICK = {
   app: {
@@ -201,7 +224,7 @@ const QUICK = {
     placeholder: "Command, like claude or npm run dev",
     build: (v) => ({
       name: v.split(/\s+/).slice(0, 3).join(" "),
-      script: `#!/bin/zsh\n# Open a new Terminal window and run: ${v}\nosascript <<'APPLESCRIPT'\ntell application "Terminal"\n  activate\n  do script "${asq(v)}"\nend tell\nAPPLESCRIPT\n`,
+      script: `#!/bin/zsh\n# Open a Terminal window and run: ${v}\nosascript - ${shq(v)} <<'APPLESCRIPT'\n${TERMINAL}APPLESCRIPT\n`,
     }),
   },
   sh: {
@@ -277,6 +300,96 @@ listen("touch", ({ payload: p }) => {
   }
 });
 
+// ---------- fun pack and clear all ----------
+
+function boardStatus(text) {
+  $("boardStatus").textContent = text;
+}
+
+$("funPack").onclick = async () => {
+  const added = await invoke("add_fun_pack");
+  boardStatus(added ? `Added ${plural(added, "touch", "touches")}.` : "Every fun pack square is already in use.");
+};
+
+// Clear all asks for a second click instead of a dialog, and forgets after a few seconds.
+let clearTimer = null;
+$("clearAll").onclick = async () => {
+  const btn = $("clearAll");
+  const count = Object.keys(state.config.slots).length;
+  if (!count) return boardStatus("There's nothing to clear.");
+  if (!btn.classList.contains("armed")) {
+    btn.classList.add("armed");
+    btn.textContent = `Remove all ${count}?`;
+    clearTimer = setTimeout(disarm, 4000);
+    return;
+  }
+  disarm();
+  await invoke("clear_all");
+  if (selected) select(selected);
+  boardStatus(`Removed ${plural(count, "touch", "touches")}. Add fun pack brings the fun ones back.`);
+};
+function disarm() {
+  clearTimeout(clearTimer);
+  $("clearAll").classList.remove("armed");
+  $("clearAll").textContent = "Clear all";
+}
+
+// ---------- window size ----------
+
+// Opens big enough to show the whole grid without scrolling, as long as the
+// screen has room.
+async function fitWindow() {
+  const board = document.querySelector(".board");
+  const pad = parseFloat(getComputedStyle(board).paddingLeft) * 2;
+  const editor = document.querySelector(".editor").offsetWidth;
+  const titlebar = document.querySelector(".titlebar").offsetHeight;
+  let w = Math.ceil(grid.scrollWidth + pad + editor + 2);
+  let h = Math.ceil(titlebar + board.scrollHeight + 2);
+  const mon = await currentMonitor();
+  if (mon) {
+    const size = mon.size.toLogical(mon.scaleFactor);
+    w = Math.min(w, size.width - 40);
+    h = Math.min(h, size.height - 80);
+  }
+  await win.setSize(new LogicalSize(w, h));
+  await win.center();
+}
+
+// ---------- updates ----------
+
+let update = null;
+
+function showUpdate(u) {
+  update = u;
+  const btn = $("update");
+  btn.hidden = !u;
+  if (!u) return;
+  btn.disabled = false;
+  btn.classList.remove("working", "err");
+  $("updateText").textContent = `Update to ${u.latest}`;
+  btn.title = `You have ${u.current}. Version ${u.latest} is out.` + (u.notes ? `\n\n${u.notes}` : "");
+}
+
+$("update").onclick = async () => {
+  const btn = $("update");
+  btn.disabled = true;
+  btn.classList.remove("err");
+  btn.classList.add("working");
+  $("updateText").textContent = "Updating…";
+  try {
+    // TouchRoute quits, swaps in the new version and opens again.
+    await invoke("install_update");
+  } catch (e) {
+    btn.disabled = false;
+    btn.classList.remove("working");
+    btn.classList.add("err");
+    $("updateText").textContent = "Update failed, try again";
+    btn.title = String(e);
+  }
+};
+
+listen("update", ({ payload }) => showUpdate(payload));
+
 // ---------- state ----------
 
 function applyState(s) {
@@ -291,6 +404,11 @@ listen("config", ({ payload }) => applyState(payload));
 listen("select-slot", ({ payload }) => select(payload));
 
 applyState(await invoke("get_state"));
+try { await fitWindow(); } catch (e) { console.error(e); }
+win.show();
+win.setFocus();
+showUpdate(state.update);
+invoke("check_update").then(showUpdate).catch(() => {});
 const initial = new URLSearchParams(location.search).get("slot");
 if (initial) select(initial);
 invoke("claude_available").then((ok) => (claudeReady = ok));

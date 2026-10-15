@@ -2,6 +2,7 @@
 //   config.json        which slots exist and what they're called
 //   scripts/F-S.sh     the script each slot runs (plain files, edit freely)
 //   logs/F-S.log       output from the last run
+//   fun/fx.js          the emoji effects the fun pack's scripts use
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -31,10 +32,32 @@ static CONFIG: Mutex<Option<Config>> = Mutex::new(None);
 pub static CONFIG_POS: Mutex<Option<(f64, f64)>> = Mutex::new(None);
 
 const TALK_TO_CLAUDE: &str = r#"#!/bin/zsh
-# Open a new Terminal window and start Claude Code.
-osascript \
-  -e 'tell application "Terminal" to activate' \
-  -e 'tell application "Terminal" to do script "claude"'
+# Open a Terminal window and start Claude Code in ~/claude. Starting it in the
+# home folder makes macOS ask for access to Photos, Music and so on.
+mkdir -p ~/claude
+osascript - "cd ~/claude && claude" <<'APPLESCRIPT'
+on run argv
+  set cmd to item 1 of argv
+  set wasRunning to application "Terminal" is running
+  tell application "Terminal"
+    activate
+    if wasRunning then
+      do script cmd
+    else
+      -- Terminal opens its own window when it launches. Reuse it.
+      repeat 50 times
+        if (count of windows) > 0 then exit repeat
+        delay 0.1
+      end repeat
+      if (count of windows) > 0 then
+        do script cmd in window 1
+      else
+        do script cmd
+      end if
+    end if
+  end tell
+end run
+APPLESCRIPT
 "#;
 
 pub fn home() -> PathBuf {
@@ -105,18 +128,53 @@ pub fn reload_if_changed() -> bool {
 pub fn init() {
     let _ = fs::create_dir_all(scripts_dir());
     let _ = fs::create_dir_all(logs_dir());
-    let cfg = match read_disk() {
-        Some(cfg) => cfg,
-        None => {
-            // First run: 5 fingers for 5 seconds talks to Claude.
-            let mut slots = BTreeMap::new();
-            slots.insert("5-5".into(), Slot { name: "Talk to Claude".into(), prompt: "Open Terminal and start claude".into() });
-            let _ = write_script("5-5", TALK_TO_CLAUDE);
-            Config { enabled: true, slots, buddy_position: None }
-        }
-    };
+    write_fx();
+    let first_run = read_disk().is_none();
+    let cfg = read_disk().unwrap_or_else(|| {
+        // First run: 5 fingers for 5 seconds talks to Claude.
+        let mut slots = BTreeMap::new();
+        slots.insert("5-5".into(), Slot { name: "Talk to Claude".into(), prompt: "Open Terminal and start claude".into() });
+        let _ = write_script("5-5", TALK_TO_CLAUDE);
+        Config { enabled: true, slots, buddy_position: None }
+    });
     *CONFIG.lock().unwrap() = Some(cfg);
+    if first_run {
+        add_fun_pack();
+    }
     save();
+}
+
+fn write_fx() {
+    let dir = home().join("fun");
+    let _ = fs::create_dir_all(&dir);
+    let _ = fs::write(dir.join("fx.js"), crate::starter::FX);
+}
+
+/// Fills every empty square that the fun pack has a touch for. Never replaces
+/// a touch the user already has. Returns how many it added.
+pub fn add_fun_pack() -> usize {
+    write_fx();
+    let mut added = 0;
+    update(|c| {
+        for (key, name, prompt, script) in crate::starter::SLOTS {
+            if c.slots.contains_key(*key) || write_script(key, script).is_err() {
+                continue;
+            }
+            c.slots.insert(key.to_string(), Slot { name: name.to_string(), prompt: prompt.to_string() });
+            added += 1;
+        }
+    });
+    added
+}
+
+/// Removes every touch and its script.
+pub fn clear_all() {
+    update(|c| {
+        for key in c.slots.keys() {
+            let _ = fs::remove_file(script_path(key));
+        }
+        c.slots.clear();
+    });
 }
 
 pub fn get() -> Config {

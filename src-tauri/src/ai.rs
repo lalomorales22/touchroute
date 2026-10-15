@@ -30,9 +30,31 @@ They want this touch to: {request}
 {revise}
 Rules:
 - Write a zsh script for macOS. It runs in the background with `zsh -l script.sh`, with no terminal window attached.
-- To show something in a terminal (claude, ssh, a TUI, a dev server), open Terminal through AppleScript:
-  osascript -e 'tell application "Terminal" to activate' -e 'tell application "Terminal" to do script "COMMAND"'
-  Use iTerm's AppleScript instead only if they mention iTerm.
+- To show something in a terminal (claude, ssh, a TUI, a dev server), open Terminal through AppleScript exactly like this, passing the command as the argument. It reuses the window Terminal opens when it launches, so the user doesn't get two:
+  osascript - "COMMAND" <<'APPLESCRIPT'
+  on run argv
+    set cmd to item 1 of argv
+    set wasRunning to application "Terminal" is running
+    tell application "Terminal"
+      activate
+      if wasRunning then
+        do script cmd
+      else
+        repeat 50 times
+          if (count of windows) > 0 then exit repeat
+          delay 0.1
+        end repeat
+        if (count of windows) > 0 then
+          do script cmd in window 1
+        else
+          do script cmd
+        end if
+      end if
+    end tell
+  end run
+  APPLESCRIPT
+  The closing APPLESCRIPT line must start at the beginning of the line. Use iTerm's AppleScript instead only if they mention iTerm.
+- Never start claude in the home folder: cd into a project first, or into ~/claude (mkdir -p ~/claude). Scanning the home folder makes macOS ask for access to Photos, Music and so on.
 - Open apps with `open -a "App Name"` and websites with `open "https://…"`.
 - To start several things at once, give each its own Terminal window or background it with &.
 - Never use sudo. Never delete or overwrite files unless they asked for that.

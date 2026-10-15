@@ -4,8 +4,10 @@ mod actions;
 mod ai;
 mod config;
 mod detector;
+mod starter;
 #[cfg(target_os = "macos")]
 mod touch_macos;
+mod update;
 
 use std::sync::OnceLock;
 
@@ -28,6 +30,8 @@ fn state_json() -> Value {
         "platform": std::env::consts::OS,
         "maxFingers": detector::MAX_FINGERS,
         "maxSeconds": detector::MAX_SECONDS,
+        "version": update::CURRENT,
+        "update": update::AVAILABLE.lock().unwrap().clone(),
     })
 }
 
@@ -88,6 +92,19 @@ fn test_slot(key: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn add_fun_pack(app: AppHandle) -> usize {
+    let added = config::add_fun_pack();
+    config_changed(&app);
+    added
+}
+
+#[tauri::command]
+fn clear_all(app: AppHandle) {
+    config::clear_all();
+    config_changed(&app);
+}
+
+#[tauri::command]
 fn set_enabled(app: AppHandle, enabled: bool) {
     config::update(|c| c.enabled = enabled);
     config_changed(&app);
@@ -102,6 +119,18 @@ fn open_settings(app: AppHandle, slot: Option<String>) {
 fn open_folder(which: String) {
     let dir = if which == "logs" { config::logs_dir() } else { config::scripts_dir() };
     let _ = std::process::Command::new("open").arg(dir).spawn();
+}
+
+#[tauri::command]
+async fn check_update() -> Result<Option<update::Update>, String> {
+    tauri::async_runtime::spawn_blocking(update::check).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(update::install).await.map_err(|e| e.to_string())??;
+    app.exit(0);
+    Ok(())
 }
 
 #[tauri::command]
@@ -136,6 +165,7 @@ fn show_settings(app: &AppHandle, slot: Option<String>) {
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true)
         .background_color(tauri::window::Color(0, 0, 0, 255))
+        .visible(false)
         .build()
         .map(|w| {
             let _ = w.set_focus();
@@ -234,6 +264,20 @@ fn watch_config(app: AppHandle) {
     });
 }
 
+/// Looks for a new release shortly after launch and then every six hours, and
+/// tells the settings window when one is out.
+fn watch_updates(app: AppHandle) {
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(10));
+        loop {
+            if let Ok(Some(found)) = update::check() {
+                let _ = app.emit("update", found);
+            }
+            std::thread::sleep(std::time::Duration::from_secs(6 * 60 * 60));
+        }
+    });
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -248,6 +292,10 @@ fn main() {
             open_settings,
             open_folder,
             reconnect,
+            check_update,
+            add_fun_pack,
+            clear_all,
+            install_update,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -263,6 +311,10 @@ fn main() {
             #[cfg(target_os = "macos")]
             touch_macos::watch();
             watch_config(app.handle().clone());
+            watch_updates(app.handle().clone());
+            if std::env::args().any(|a| a == "--updated") {
+                show_settings(app.handle(), None);
+            }
             Ok(())
         })
         .build(tauri::generate_context!())

@@ -94,6 +94,12 @@ Prefer a download? Grab `TouchRoute.dmg` from [Releases](https://github.com/lalo
 
 **Windows and Linux:** coming soon, with up to 5 fingers.
 
+## The fun pack
+
+A fresh install comes with the grid already full of things to try: confetti, fireworks, money rain, floating hearts, a magic 8 ball, dice, a coin flip, dad jokes, and quick ways to open the apps every Mac has. The emoji effects draw over your screen for a few seconds, and clicks pass straight through.
+
+Don't want them? **Clear all** under the grid empties it, and **Add fun pack** brings them back without touching your own touches.
+
 ## Ideas
 
 | Touch | What it does |
@@ -115,11 +121,13 @@ Everything lives in plain files you can edit, back up or sync:
   config.json        your touches and their names
   scripts/5-5.sh     what 5 fingers × 5 seconds runs (plain zsh)
   logs/5-5.log       output from the last run
+  fun/fx.js          the emoji effects the fun pack uses
 ```
 
 - **Trackpad:** on macOS, TouchRoute reads raw contacts from the private `MultitouchSupport` framework (the one BetterTouchTool uses). It needs no permissions and sees all ten fingers.
 - **Detection:** waits ~0.3 s for the finger count to settle, times from the moment the fingers land, ignores a finger that blinks out for a split second, and cancels if anything moves.
 - **Scripts:** run in your login shell, so your PATH, tools and aliases work the same as in Terminal.
+- **Updates:** when a new release is out, an **Update** button shows up in settings. It downloads the release, swaps the app and reopens it.
 - **App:** [Tauri 2](https://tauri.app), a Rust core with a plain HTML/JS interface. About 6 MB.
 
 ```
@@ -127,6 +135,8 @@ src-tauri/src/touch_macos.rs   trackpad reader
 src-tauri/src/detector.rs      fingers + stillness + timing → touch
 src-tauri/src/actions.rs       runs touch scripts
 src-tauri/src/ai.rs            asks the claude CLI to write a script
+src-tauri/src/update.rs        checks GitHub for a new release and installs it
+src-tauri/starter/             the fun pack's scripts and emoji effects
 ui/buddy.*                     the floating buddy and its dial
 ui/settings.*                  the grid and editor
 skills/touchroute/SKILL.md     teaches AI agents to set up touches

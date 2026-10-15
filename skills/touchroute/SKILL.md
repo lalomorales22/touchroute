@@ -63,15 +63,34 @@ Scripts run in the background in a login shell (`zsh -l` on macOS), from the hom
 - **To show something in a terminal** (claude, ssh, a TUI, a dev server), open a Terminal window and run the command there:
 
   ```zsh
-  osascript <<'APPLESCRIPT'
-  tell application "Terminal"
-    activate
-    do script "cd ~/code/site && npm run dev"
-  end tell
+  osascript - "cd ~/code/site && npm run dev" <<'APPLESCRIPT'
+  on run argv
+    set cmd to item 1 of argv
+    set wasRunning to application "Terminal" is running
+    tell application "Terminal"
+      activate
+      if wasRunning then
+        do script cmd
+      else
+        -- Terminal opens its own window when it launches. Reuse it,
+        -- or the user ends up with two windows.
+        repeat 50 times
+          if (count of windows) > 0 then exit repeat
+          delay 0.1
+        end repeat
+        if (count of windows) > 0 then
+          do script cmd in window 1
+        else
+          do script cmd
+        end if
+      end if
+    end tell
+  end run
   APPLESCRIPT
   ```
 
-  Use iTerm's AppleScript only if the user uses iTerm. Inside `do script "…"`, escape `"` and `\`.
+  Always use this pattern. A bare `activate` + `do script` opens **two** windows when Terminal wasn't already running (Terminal's own startup window, plus the one `do script` makes). The command is passed as an argument, so it needs no escaping. Use iTerm's AppleScript only if the user uses iTerm.
+- **Never start `claude` (or any tool that scans its folder) in the home folder.** A new Terminal window opens in `~`, and scanning it makes macOS ask for access to Photos, Music, Google Drive and so on. Always `cd` first: into the project the user named, or `~/claude` (create it with `mkdir -p ~/claude` if missing) as a neutral default.
 - **Apps:** `open -a "Spotify"`. **Websites:** `open "https://example.com"`. **Files and folders:** `open ~/Documents/plan.md`.
 - **Several agents or tasks at once:** give each its own Terminal window (one `do script` per window), or background quick commands with `&`.
 - **Notifications:** `osascript -e 'display notification "Deployed" with title "TouchRoute"'`.
@@ -85,12 +104,31 @@ Scripts run in the background in a login shell (`zsh -l` on macOS), from the hom
 
 ```zsh
 #!/bin/zsh
-# Open a new Terminal window and start Claude Code.
-osascript <<'APPLESCRIPT'
-tell application "Terminal"
-  activate
-  do script "claude"
-end tell
+# Open a Terminal window and start Claude Code in ~/claude.
+mkdir -p ~/claude
+osascript - "cd ~/claude && claude" <<'APPLESCRIPT'
+on run argv
+  set cmd to item 1 of argv
+  set wasRunning to application "Terminal" is running
+  tell application "Terminal"
+    activate
+    if wasRunning then
+      do script cmd
+    else
+      -- Terminal opens its own window when it launches. Reuse it,
+      -- or the user ends up with two windows.
+      repeat 50 times
+        if (count of windows) > 0 then exit repeat
+        delay 0.1
+      end repeat
+      if (count of windows) > 0 then
+        do script cmd in window 1
+      else
+        do script cmd
+      end if
+    end if
+  end tell
+end run
 APPLESCRIPT
 ```
 
@@ -100,14 +138,30 @@ APPLESCRIPT
 #!/bin/zsh
 # Open one Terminal window per project, each running Claude Code.
 for project in ~/code/site ~/code/api ~/code/app; do
-  osascript - "$project" <<'APPLESCRIPT'
-on run argv
-  tell application "Terminal"
-    activate
-    do script "cd " & quoted form of (item 1 of argv) & " && claude"
-  end tell
-end run
-APPLESCRIPT
+  osascript - "cd ${(q)project} && claude" <<'APPLESCRIPT'
+  on run argv
+    set cmd to item 1 of argv
+    set wasRunning to application "Terminal" is running
+    tell application "Terminal"
+      activate
+      if wasRunning then
+        do script cmd
+      else
+        -- Terminal opens its own window when it launches. Reuse it,
+        -- or the user ends up with two windows.
+        repeat 50 times
+          if (count of windows) > 0 then exit repeat
+          delay 0.1
+        end repeat
+        if (count of windows) > 0 then
+          do script cmd in window 1
+        else
+          do script cmd
+        end if
+      end if
+    end tell
+  end run
+  APPLESCRIPT
 done
 ```
 

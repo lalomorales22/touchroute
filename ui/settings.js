@@ -1,4 +1,4 @@
-import { invoke, listen, win, currentMonitor, LogicalSize, fingerColor, slotKey, parseKey, slotCode, plural } from "./shared.js";
+import { invoke, listen, win, currentMonitor, LogicalSize, fingerColor, THEMES, setTheme, slotKey, parseKey, slotCode, plural } from "./shared.js";
 
 const SOON = [9, 10];
 const $ = (id) => document.getElementById(id);
@@ -390,10 +390,47 @@ $("update").onclick = async () => {
 
 listen("update", ({ payload }) => showUpdate(payload));
 
+// ---------- orb themes ----------
+
+// A swatch is a little wheel of the theme's colors; cosmic gets a galaxy.
+function swatchFill(name) {
+  const t = THEMES[name];
+  const col = ([h, s]) => `hsl(${h}, ${s}%, ${t.light ? t.light(72) : 72}%)`;
+  if (t.galaxy) {
+    return `radial-gradient(circle at 35% 35%, #fff 0 1px, transparent 1.5px),
+      radial-gradient(circle at 65% 60%, ${col(t.tones[3])} 0, transparent 45%),
+      radial-gradient(circle at 35% 65%, ${col(t.tones[4])} 0, transparent 45%),
+      radial-gradient(circle, ${col(t.tones[0])}, #0b0420)`;
+  }
+  return `conic-gradient(${t.tones.slice(0, 6).map(col).join(", ")}, ${col(t.tones[0])})`;
+}
+
+for (const name of Object.keys(THEMES)) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "swatch";
+  b.dataset.theme = name;
+  b.title = `${THEMES[name].label} orbs`;
+  b.setAttribute("role", "radio");
+  b.style.setProperty("--sw", swatchFill(name));
+  b.onclick = () => invoke("set_theme", { theme: name });
+  $("themes").appendChild(b);
+}
+
 // ---------- state ----------
 
+let theme = null;
 function applyState(s) {
   state = s;
+  if (s.config.theme !== theme) {
+    theme = s.config.theme;
+    setTheme(theme);
+    document.querySelectorAll(".swatch").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.theme === theme)));
+    if (grid.children.length) {
+      buildGrid();
+      if (selected) form.style.setProperty("--c", fingerColor(parseKey(selected)[0]));
+    }
+  }
   $("enabled").checked = s.config.enabled;
   $("enabledText").textContent = s.config.enabled ? "On" : "Paused";
   if (!grid.children.length) buildGrid(); else paintGrid();

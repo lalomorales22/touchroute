@@ -105,6 +105,16 @@ fn clear_all(app: AppHandle) {
 }
 
 #[tauri::command]
+fn set_theme(app: AppHandle, theme: String) -> Result<(), String> {
+    if !config::THEMES.contains(&theme.as_str()) {
+        return Err("Unknown theme.".into());
+    }
+    config::update(|c| c.theme = theme);
+    config_changed(&app);
+    Ok(())
+}
+
+#[tauri::command]
 fn set_enabled(app: AppHandle, enabled: bool) {
     config::update(|c| c.enabled = enabled);
     config_changed(&app);
@@ -280,6 +290,7 @@ fn main() {
             delete_slot,
             test_slot,
             set_enabled,
+            set_theme,
             open_settings,
             open_folder,
             check_update,

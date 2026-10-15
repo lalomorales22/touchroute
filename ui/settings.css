@@ -27,6 +27,15 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 .live.on { color: var(--text); }
 .live b { font: 400 13px/1 var(--display); color: var(--platinum); margin-right: 6px; font-variant-numeric: tabular-nums; }
 
+.themes { display: flex; gap: 7px; align-items: center; }
+.swatch {
+  width: 18px; height: 18px; border-radius: 50%; padding: 0; cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.18); background: var(--sw);
+  transition: transform 150ms, box-shadow 150ms;
+}
+.swatch:hover { transform: scale(1.15); }
+.swatch[aria-checked="true"] { box-shadow: 0 0 0 2px var(--void), 0 0 0 3.5px var(--platinum); }
+
 .switch { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12.5px; color: var(--dim); }
 .switch input { position: absolute; opacity: 0; pointer-events: none; }
 .track { width: 34px; height: 20px; border-radius: 10px; background: var(--raised-hi); border: 1px solid var(--line); position: relative; transition: background 200ms; }

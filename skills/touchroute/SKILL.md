@@ -37,6 +37,7 @@ Everything you need is in plain files. The app watches them and picks up changes
 
 - `slots` keys are `"N-S"`. `name` is the label the user sees on their desktop buddy, so keep it to 2 to 4 words. `prompt` is the plain-English request the touch came from (optional, but fill it in so the user can revise it later).
 - `enabled: false` pauses every touch. Don't change it unless asked.
+- `theme` sets the orb colors: `classic`, `dusk` (darker), `neon` (brighter) or `cosmic` (galaxy-filled orbs). Change it only when the user asks.
 - Leave `buddy_position` and any other fields alone.
 
 A touch only exists when it has **both** an entry in `slots` and a script at `scripts/N-S.sh`.

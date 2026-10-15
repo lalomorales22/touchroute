@@ -25,7 +25,16 @@ pub struct Config {
     pub slots: BTreeMap<String, Slot>,
     #[serde(default)]
     pub buddy_position: Option<(f64, f64)>,
+    /// Orb color theme: classic, dusk, neon or cosmic.
+    #[serde(default = "classic")]
+    pub theme: String,
 }
+
+fn classic() -> String {
+    "classic".into()
+}
+
+pub const THEMES: [&str; 4] = ["classic", "dusk", "neon", "cosmic"];
 
 static CONFIG: Mutex<Option<Config>> = Mutex::new(None);
 /// Where the buddy was dragged to; folded into config.json on the next save.
@@ -135,7 +144,7 @@ pub fn init() {
         let mut slots = BTreeMap::new();
         slots.insert("5-5".into(), Slot { name: "Talk to Claude".into(), prompt: "Open Terminal and start claude".into() });
         let _ = write_script("5-5", TALK_TO_CLAUDE);
-        Config { enabled: true, slots, buddy_position: None }
+        Config { enabled: true, slots, buddy_position: None, theme: classic() }
     });
     *CONFIG.lock().unwrap() = Some(cfg);
     if first_run {

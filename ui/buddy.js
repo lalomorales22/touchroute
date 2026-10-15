@@ -1,4 +1,4 @@
-import { invoke, listen, win, currentMonitor, LogicalSize, LogicalPosition, fingerColor, parseKey, slotCode, plural } from "./shared.js";
+import { invoke, listen, win, currentMonitor, LogicalSize, LogicalPosition, fingerColor, fingerHue, setTheme, isGalaxy, parseKey, slotCode, plural } from "./shared.js";
 
 // The buddy is just its dots, floating on the desktop with no backing. Each
 // colored dot is one of your touches. Zooming in spreads them slowly into a
@@ -25,6 +25,7 @@ const paused = () => state && !state.config.enabled;
 const IDLE = { phase: "idle", fingers: 0, elapsed: 0, slot: null, at: 0 };
 
 let state = null;
+let theme = null;
 let slots = new Map();   // key -> { f, s, name }
 let dots = [];           // living dots, one per touch
 let dust = [];           // tiny ambient motes that keep an empty buddy alive
@@ -42,6 +43,11 @@ let readoutUntil = 0;
 
 function applyState(s) {
   state = s;
+  if (s.config.theme !== theme) {
+    theme = s.config.theme;
+    setTheme(theme);
+    galaxies.clear();
+  }
   if (paused()) {
     touch = { ...IDLE };
     burst = 0;
@@ -267,7 +273,8 @@ listen("config", ({ payload }) => applyState(payload));
 
 // A dot is a little bead: a soft halo, a dark rim so it reads on light
 // wallpapers, a shaded body, and a highlight so it feels round.
-function bead(x, y, r, f, alpha, lit) {
+function bead(x, y, r, f, alpha, lit, seed = 0) {
+  if (isGalaxy()) return galaxyBead(x, y, r * 1.25, f, alpha, lit, seed);
   const halo = r * (2.4 + lit);
   const glow = ctx.createRadialGradient(x, y, r * 0.6, x, y, halo);
   glow.addColorStop(0, fingerColor(f, 0.3 * alpha * lit));
@@ -286,6 +293,82 @@ function bead(x, y, r, f, alpha, lit) {
 
   ctx.fillStyle = `rgba(255,255,255,${0.5 * alpha})`;
   ctx.beginPath(); ctx.arc(x - r * 0.33, y - r * 0.38, r * 0.26, 0, 7); ctx.fill();
+}
+
+// ---------- cosmic theme ----------
+
+// One painted galaxy per finger count: deep space, nebula clouds in that
+// finger's colors, two spiral arms of stars. Made once, then spun inside
+// each orb.
+const galaxies = new Map();
+function galaxy(f) {
+  if (galaxies.has(f)) return galaxies.get(f);
+  const S = 128, c = document.createElement("canvas");
+  c.width = c.height = S;
+  const g = c.getContext("2d");
+  const h = fingerHue(f);
+  const bg = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+  bg.addColorStop(0, `hsl(${h}, 60%, 22%)`);
+  bg.addColorStop(1, `hsl(${h + 40}, 70%, 5%)`);
+  g.fillStyle = bg;
+  g.fillRect(0, 0, S, S);
+  for (const [dh, n] of [[0, 4], [50, 3], [-60, 3]]) {
+    for (let i = 0; i < n; i++) {
+      const x = Math.random() * S, y = Math.random() * S, r = 18 + Math.random() * 30;
+      const cloud = g.createRadialGradient(x, y, 0, x, y, r);
+      cloud.addColorStop(0, `hsla(${h + dh}, 95%, 62%, 0.55)`);
+      cloud.addColorStop(1, `hsla(${h + dh}, 95%, 50%, 0)`);
+      g.fillStyle = cloud;
+      g.fillRect(0, 0, S, S);
+    }
+  }
+  for (let arm = 0; arm < 2; arm++) {
+    for (let i = 0; i < 160; i++) {
+      const k = i / 160;
+      const a = arm * Math.PI + k * 4.2 + (Math.random() - 0.5) * 0.5;
+      const r = 4 + k * S * 0.48 + (Math.random() - 0.5) * 6;
+      g.fillStyle = `hsla(${h + 20 - k * 60}, 100%, ${85 - k * 25}%, ${0.9 - k * 0.5})`;
+      g.beginPath(); g.arc(S / 2 + Math.cos(a) * r, S / 2 + Math.sin(a) * r, 0.6 + Math.random() * 1.1, 0, 7); g.fill();
+    }
+  }
+  for (let i = 0; i < 70; i++) {
+    g.fillStyle = `rgba(255,255,255,${0.4 + Math.random() * 0.6})`;
+    g.beginPath(); g.arc(Math.random() * S, Math.random() * S, Math.random() * 1.2, 0, 7); g.fill();
+  }
+  galaxies.set(f, c);
+  return c;
+}
+
+function galaxyBead(x, y, r, f, alpha, lit, seed) {
+  const t = performance.now() / 1000;
+  const hue = (fingerHue(f) + t * 40 + seed * 3) % 360; // the rim slowly cycles color
+  const halo = r * (2.6 + lit);
+  const glow = ctx.createRadialGradient(x, y, r * 0.6, x, y, halo);
+  glow.addColorStop(0, `hsla(${hue}, 100%, 65%, ${0.35 * alpha * lit})`);
+  glow.addColorStop(1, `hsla(${hue}, 100%, 65%, 0)`);
+  ctx.fillStyle = glow;
+  ctx.beginPath(); ctx.arc(x, y, halo, 0, 7); ctx.fill();
+
+  ctx.save();
+  ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.clip();
+  ctx.globalAlpha = alpha;
+  ctx.translate(x, y);
+  ctx.rotate(t * 0.5 + seed);
+  const R = r * 1.5;
+  ctx.drawImage(galaxy(f), -R, -R, R * 2, R * 2);
+  ctx.restore();
+
+  // Shade the edge so it reads as a glass marble, then a bright rim and glint.
+  const shade = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.2, x, y, r);
+  shade.addColorStop(0, "rgba(0,0,0,0)");
+  shade.addColorStop(1, `rgba(0,0,0,${0.55 * alpha})`);
+  ctx.fillStyle = shade;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+  ctx.strokeStyle = `hsla(${hue}, 100%, 72%, ${0.85 * alpha})`;
+  ctx.lineWidth = 1.1;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.stroke();
+  ctx.fillStyle = `rgba(255,255,255,${0.6 * alpha})`;
+  ctx.beginPath(); ctx.arc(x - r * 0.35, y - r * 0.4, r * 0.22, 0, 7); ctx.fill();
 }
 
 function drawDial(alpha) {
@@ -428,7 +511,7 @@ function frame(now) {
     const litTarget = holding && touch.fingers ? (d.f === touch.fingers ? 1.5 : 0.45) : d.key === hover ? 1.6 : 1;
     d.lit += (litTarget - d.lit) * follow;
     const size = (4.6 + Math.min(d.s, 8) * 0.3) * (1 - 0.22 * k) * (d.key === hover ? 1.25 : 1);
-    bead(d.x, d.y, size, d.f, Math.min(1, 0.55 + 0.45 * d.lit), d.lit);
+    bead(d.x, d.y, size, d.f, Math.min(1, 0.55 + 0.45 * d.lit), d.lit, d.seed);
   }
 
   if (counting || touch.phase === "fired") {

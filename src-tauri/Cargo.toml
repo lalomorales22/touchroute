@@ -1,6 +1,6 @@
 [package]
 name = "touchroute"
-version = "0.5.0"
+version = "0.6.0"
 description = "Hold fingers on your trackpad to run anything"
 edition = "2021"
 

@@ -9,9 +9,26 @@
 //   osascript -l JavaScript fx.js MODE "EMOJI EMOJI ..." ["TEXT"]
 //
 // MODE: pop, spin, rain, burst, fireworks, float, launch, banner
+//
+// While TouchRoute is running, this hands the effect to the app, which plays
+// a much fancier version (see `~/.touchroute/bin/touchroute fx`). The simple
+// version below only plays when the app isn't running.
 ObjC.import("Cocoa");
 
+function forward(argv) {
+  try {
+    const app = Application.currentApplication();
+    app.includeStandardAdditions = true;
+    const q = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
+    app.doShellScript('"$HOME/.touchroute/bin/touchroute" fx ' + argv.map(q).join(" "));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 function run(argv) {
+  if (forward(argv)) return;
   const mode = argv[0] || "pop";
   const emojis = (argv[1] || "🎉").split(" ").filter(Boolean);
   const text = argv[2] || "";

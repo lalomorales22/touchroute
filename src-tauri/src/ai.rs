@@ -16,7 +16,9 @@ pub fn available() -> bool {
     login_shell("command -v claude", None).is_ok_and(|s| !s.trim().is_empty())
 }
 
-pub fn write_script(request: &str, fingers: u32, seconds: u32, current: Option<&str>) -> Result<Draft, String> {
+/// `trigger` finishes the sentence "When the user …", like "holds 3 fingers
+/// still on their trackpad for 2 seconds and lets go".
+pub fn write_script(request: &str, trigger: &str, current: Option<&str>) -> Result<Draft, String> {
     let revise = match current {
         Some(script) if !script.trim().is_empty() => format!(
             "\nThis is the script they have now. Change it to match the new request:\n```zsh\n{script}\n```\n"
@@ -24,9 +26,9 @@ pub fn write_script(request: &str, fingers: u32, seconds: u32, current: Option<&
         _ => String::new(),
     };
     let prompt = format!(
-        r#"You write scripts for TouchRoute, a macOS app. When the user holds {fingers} fingers still on their trackpad for {seconds} seconds and lets go, TouchRoute runs a zsh script.
+        r#"You write scripts for TouchRoute, a macOS app. When the user {trigger}, TouchRoute runs a zsh script.
 
-They want this touch to: {request}
+They want it to: {request}
 {revise}
 Rules:
 - Write a zsh script for macOS. It runs in the background with `zsh -l script.sh`, with no terminal window attached.
@@ -57,6 +59,7 @@ Rules:
 - Never start claude in the home folder: cd into a project first, or into ~/claude (mkdir -p ~/claude). Scanning the home folder makes macOS ask for access to Photos, Music and so on.
 - Open apps with `open -a "App Name"` and websites with `open "https://…"`.
 - To start several things at once, give each its own Terminal window or background it with &.
+- For something fun or celebratory to see, TouchRoute can play full-screen effects: `~/.touchroute/bin/touchroute fx MODE ["caption"]` where MODE is lightning, fire, hearts, warp, matrix, confetti, fireworks, supernova, portal, aurora, neon (the caption is the sign's text), bubbles, galaxy, disco or snow. Emoji effects take the emoji first: `~/.touchroute/bin/touchroute fx MODE "🎉 🎊" ["caption"]` where MODE is pop, spin, rain, burst, float, launch or banner. Each returns right away; add `sleep 2` between effects you want one after another. Pair them with a sound like `afplay /System/Library/Sounds/Glass.aiff &`.
 - Never use sudo. Never delete or overwrite files unless they asked for that.
 - Keep it short, and add plain-English comments a beginner can follow.
 

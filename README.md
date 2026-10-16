@@ -50,6 +50,8 @@ Scroll up on it (or double-click) and the dots slowly unfold into a **dial**: ri
 
 No more forgetting what `4·7` does.
 
+It notices what your Mac is doing, too: the dots doze off with floating z's when you step away (and jump when you come back), get drowsy late at night or on low battery, and break a sweat when your Mac is working hard.
+
 </td>
 <td width="52%"><img src="assets/media/dial.gif" alt="The buddy's dots unfold into a circular dial of fingers and seconds; pointing at dots shows Talk to Claude and Start dev server" width="100%"></td>
 </tr>
@@ -94,11 +96,38 @@ Prefer a download? Grab `TouchRoute.dmg` from [Releases](https://github.com/lalo
 
 **Windows and Linux:** coming soon, with up to 5 fingers.
 
+## Draw to run
+
+Hold **⌥ Option** and draw a shape on your trackpad with one finger. A glowing rainbow line follows your finger across the screen, and when you lift, a shape it knows bursts into light and runs. A heart throws glowing hearts, a circle opens a portal, a check mark fires confetti cannons, a lightning bolt cracks lightning across the screen.
+
+Make your own in **Drawings**: draw a shape two or three times (on the trackpad or with the mouse) so it learns your style, then tell it what to do, the same way as a touch. TouchRoute tells you if a new shape looks too much like one you already have.
+
+## Feel it
+
+On a Force Touch trackpad, TouchRoute taps your finger as each second passes, a little firmer on a square that has a touch, and gives a solid click when a touch fires. You can count without looking. Turn it off with **Trackpad clicks** in settings.
+
 ## The fun pack
 
-A fresh install comes with the grid already full of things to try: confetti, fireworks, money rain, floating hearts, a magic 8 ball, dice, a coin flip, dad jokes, and quick ways to open the apps every Mac has. The emoji effects draw over your screen for a few seconds, and clicks pass straight through.
+A fresh install comes with the grid already full of things to try: lightning storms, flames, warp speed, the Matrix, a supernova, a portal, northern lights, a neon sign, a disco ball, confetti cannons, fireworks, a magic 8 ball, dice, dad jokes, and quick ways to open the apps every Mac has. Effects draw over your whole screen for a few seconds, and clicks pass straight through.
 
 Don't want them? **Clear all** under the grid empties it, and **Add fun pack** brings them back without touching your own touches.
+
+## Effects for any script
+
+Every effect is one command, so your own touches can use them too:
+
+```bash
+~/.touchroute/bin/touchroute fx lightning
+~/.touchroute/bin/touchroute fx neon "SHIP IT"
+~/.touchroute/bin/touchroute fx rain "🍕 🧀" "pizza time"
+~/.touchroute/bin/touchroute feel strong
+```
+
+Effects: `lightning` `fire` `hearts` `warp` `matrix` `confetti` `fireworks` `supernova` `portal` `aurora` `neon` `bubbles` `galaxy` `disco` `snow`, plus the emoji effects `pop` `spin` `rain` `burst` `float` `launch` `banner`. The **Effects** tab in settings plays each one so you can pick. Claude knows about them when it writes a script for you.
+
+## Share packs
+
+A pack is one `.touchroute` file with touches and drawings in it. In **Packs**, save yours to the Desktop and send it to a friend or post it on GitHub. To add one, double-click the file, choose it in settings, or paste a link (a GitHub file, a gist, any https address). You see every square it fills and every script it runs before anything is added, and it only fills empty squares unless you say otherwise.
 
 ## Make it yours
 
@@ -129,10 +158,14 @@ Everything lives in plain files you can edit, back up or sync:
   config.json        your touches and their names
   scripts/5-5.sh     what 5 fingers × 5 seconds runs (plain zsh)
   logs/5-5.log       output from the last run
-  fun/fx.js          the emoji effects the fun pack uses
+  drawings/ID.sh     what each saved drawing runs
+  bin/touchroute     the command scripts use for effects and clicks
 ```
 
 - **Trackpad:** on macOS, TouchRoute reads raw contacts from the private `MultitouchSupport` framework (the one BetterTouchTool uses). It needs no permissions and sees all ten fingers.
+- **Drawings:** strokes are matched like the $1 recognizer (resampled, centered, scaled), comparing both position and direction along the stroke, so a star never passes for a circle. It handles strokes drawn backwards, tilted, squashed or started anywhere around a closed shape.
+- **Haptics:** clicks the trackpad's motor directly where macOS allows it, and otherwise asks AppKit for its standard feedback.
+- **Effects:** a see-through, click-through window over the screen draws them on a canvas. Scripts reach the app through a socket in `~/.touchroute`.
 - **Detection:** waits ~0.3 s for the finger count to settle, times from the moment the fingers land, ignores a finger that blinks out for a split second, and cancels if anything moves.
 - **Scripts:** run in your login shell, so your PATH, tools and aliases work the same as in Terminal.
 - **Updates:** when a new release is out, an **Update** button shows up in settings. It downloads the release, swaps the app and reopens it.
@@ -141,10 +174,16 @@ Everything lives in plain files you can edit, back up or sync:
 ```
 src-tauri/src/touch_macos.rs   trackpad reader
 src-tauri/src/detector.rs      fingers + stillness + timing → touch
+src-tauri/src/draw.rs          Option-drawing, ink and the shape recognizer
+src-tauri/src/haptics.rs       trackpad clicks
+src-tauri/src/mood.rs          away, busy and battery, for the buddy
+src-tauri/src/fx.rs, ipc.rs    the effects layer and the touchroute command
+src-tauri/src/packs.rs         .touchroute packs
 src-tauri/src/actions.rs       runs touch scripts
 src-tauri/src/ai.rs            asks the claude CLI to write a script
 src-tauri/src/update.rs        checks GitHub for a new release and installs it
-src-tauri/starter/             the fun pack's scripts and emoji effects
+src-tauri/starter/             the fun pack and drawing pack scripts
+ui/fx.*                        every full-screen effect and the drawing ink
 ui/buddy.*                     the floating buddy and its dial
 ui/settings.*                  the grid and editor
 skills/touchroute/SKILL.md     teaches AI agents to set up touches
@@ -161,7 +200,7 @@ cargo tauri dev      # run it
 cargo tauri build    # .app and .dmg in target/release/bundle
 ```
 
-To see exactly what the trackpad reports, run `TOUCHROUTE_DEBUG=1 cargo tauri dev`. It prints every change in contacts and finger states.
+To see exactly what the trackpad reports, run `TOUCHROUTE_DEBUG=1 cargo tauri dev`. It prints every change in contacts and finger states. Debug builds also take `TOUCHROUTE_DEMO_DRAW=heart,star` (feeds fake strokes through the drawing pipeline) and `TOUCHROUTE_DEMO_MOOD=away` or `busy`.
 
 ## Roadmap
 

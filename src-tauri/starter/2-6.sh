@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Spin a big unicorn.
-afplay /System/Library/Sounds/Bottle.aiff &
-osascript -l JavaScript ~/.touchroute/fun/fx.js spin "🦄" "magical"
+# Punch it: stars stretch into hyperspace.
+afplay /System/Library/Sounds/Submarine.aiff &
+~/.touchroute/bin/touchroute fx warp
 wait

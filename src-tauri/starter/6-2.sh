@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Slide a big WOW across the screen.
+# Flicker on a giant neon WOW.
 afplay /System/Library/Sounds/Glass.aiff &
-osascript -l JavaScript ~/.touchroute/fun/fx.js banner "🌈 🤩" "WOW"
+~/.touchroute/bin/touchroute fx neon "WOW"
 wait

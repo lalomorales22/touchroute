@@ -4,12 +4,18 @@ mod actions;
 mod ai;
 mod config;
 mod detector;
+mod draw;
+mod fx;
+mod haptics;
+mod ipc;
+mod mood;
+mod packs;
 mod starter;
 #[cfg(target_os = "macos")]
 mod touch_macos;
 mod update;
 
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use serde_json::{json, Value};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -18,7 +24,7 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder, Windo
 
 pub static APP: OnceLock<AppHandle> = OnceLock::new();
 
-const BUDDY_SIZE: f64 = 200.0;
+const BUDDY_SIZE: f64 = 260.0;
 
 fn config_changed(app: &AppHandle) {
     let _ = app.emit("config", state_json());
@@ -32,6 +38,8 @@ fn state_json() -> Value {
         "maxSeconds": detector::MAX_SECONDS,
         "version": update::CURRENT,
         "update": update::AVAILABLE.lock().unwrap().clone(),
+        "mood": mood::CURRENT.lock().unwrap().clone(),
+        "effects": fx::MODES,
     })
 }
 
@@ -50,8 +58,19 @@ async fn claude_available() -> bool {
 }
 
 #[tauri::command]
-async fn ask_claude(request: String, fingers: u32, seconds: u32, current: Option<String>) -> Result<ai::Draft, String> {
-    tauri::async_runtime::spawn_blocking(move || ai::write_script(&request, fingers, seconds, current.as_deref()))
+async fn ask_claude(
+    request: String,
+    fingers: Option<u32>,
+    seconds: Option<u32>,
+    drawing: Option<String>,
+    current: Option<String>,
+) -> Result<ai::Draft, String> {
+    let trigger = match (drawing, fingers, seconds) {
+        (Some(shape), _, _) => format!("holds Option and draws a shape ({shape}) on their trackpad with one finger"),
+        (None, Some(f), Some(s)) => format!("holds {f} fingers still on their trackpad for {s} seconds and lets go"),
+        _ => return Err("Pick a square or a drawing first.".into()),
+    };
+    tauri::async_runtime::spawn_blocking(move || ai::write_script(&request, &trigger, current.as_deref()))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -129,6 +148,176 @@ fn set_look(app: AppHandle, theme: Option<String>, style: Option<String>, reacti
 }
 
 #[tauri::command]
+fn set_haptics(app: AppHandle, on: bool) {
+    config::update(|c| c.haptics = on);
+    config_changed(&app);
+    if on {
+        haptics::feel(haptics::Feel::Medium);
+    }
+}
+
+// ---------- drawings ----------
+
+fn check_id(id: &str) -> Result<(), String> {
+    if config::valid_id(id) { Ok(()) } else { Err("That isn't a valid drawing.".into()) }
+}
+
+/// A new id from the drawing's name, like "coffee-k3x9".
+fn new_id(name: &str) -> String {
+    let slug: String = name
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .split('-')
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    let slug: String = slug.chars().take(24).collect();
+    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+    let mut tag = String::new();
+    let mut k = n % 36u64.pow(4);
+    for _ in 0..4 {
+        tag.push(std::char::from_digit((k % 36) as u32, 36).unwrap());
+        k /= 36;
+    }
+    if slug.is_empty() { format!("drawing-{tag}") } else { format!("{slug}-{tag}") }
+}
+
+#[tauri::command]
+fn get_drawing_script(id: String) -> Result<String, String> {
+    check_id(&id)?;
+    Ok(std::fs::read_to_string(config::drawing_path(&id)).unwrap_or_default())
+}
+
+#[tauri::command]
+fn save_drawing(
+    app: AppHandle,
+    id: Option<String>,
+    name: String,
+    prompt: String,
+    script: String,
+    samples: Vec<Vec<[f32; 2]>>,
+) -> Result<String, String> {
+    let samples: Vec<_> = samples.into_iter().filter(|s| s.len() >= 2).take(8).collect();
+    if samples.is_empty() {
+        return Err("Draw the shape first.".into());
+    }
+    let id = match id {
+        Some(id) => {
+            check_id(&id)?;
+            id
+        }
+        None => new_id(&name),
+    };
+    config::write_drawing(&id, &script).map_err(|e| e.to_string())?;
+    config::update(|c| {
+        let d = config::Drawing { id: id.clone(), name, prompt, samples };
+        match c.drawings.iter_mut().find(|x| x.id == id) {
+            Some(x) => *x = d,
+            None => c.drawings.push(d),
+        }
+    });
+    config_changed(&app);
+    Ok(id)
+}
+
+#[tauri::command]
+fn delete_drawing(app: AppHandle, id: String) -> Result<(), String> {
+    check_id(&id)?;
+    let _ = std::fs::remove_file(config::drawing_path(&id));
+    config::update(|c| c.drawings.retain(|d| d.id != id));
+    config_changed(&app);
+    Ok(())
+}
+
+#[tauri::command]
+fn test_drawing(id: String) -> Result<(), String> {
+    check_id(&id)?;
+    actions::run_file(&config::drawing_path(&id), &format!("draw-{id}"));
+    Ok(())
+}
+
+/// While settings is recording a drawing, trackpad strokes go to it.
+#[tauri::command]
+fn set_recording(on: bool) {
+    draw::RECORDING.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Which saved drawing a stroke drawn in settings would match.
+#[tauri::command]
+fn match_stroke(points: Vec<[f32; 2]>) -> Option<String> {
+    let cfg = config::get();
+    draw::recognize(&points, &cfg.drawings).map(|(d, _)| d.id.clone())
+}
+
+#[tauri::command]
+fn add_drawing_pack(app: AppHandle) -> usize {
+    let added = config::add_drawing_pack();
+    config_changed(&app);
+    added
+}
+
+#[tauri::command]
+fn play_fx(mode: String, args: Vec<String>) -> Result<(), String> {
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    fx::play(&mode, &args)
+}
+
+// ---------- packs ----------
+
+/// A pack opened from Finder before settings was ready to show it.
+static OPENED_PACK: Mutex<Option<Result<packs::Pack, String>>> = Mutex::new(None);
+
+#[tauri::command]
+fn take_opened_pack() -> Option<Result<packs::Pack, String>> {
+    OPENED_PACK.lock().unwrap().take()
+}
+
+#[tauri::command]
+fn pack_builtin(name: String) -> Result<packs::Pack, String> {
+    packs::builtin(&name).ok_or_else(|| "No such pack.".into())
+}
+
+#[tauri::command]
+async fn pack_from_file() -> Result<Option<packs::Pack>, String> {
+    tauri::async_runtime::spawn_blocking(|| match packs::choose_file() {
+        Some(path) => packs::read(&path).map(Some),
+        None => Ok(None),
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pack_from_url(url: String) -> Result<packs::Pack, String> {
+    tauri::async_runtime::spawn_blocking(move || packs::fetch(&url)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn pack_install(app: AppHandle, pack: packs::Pack, replace: bool) -> Result<packs::Installed, String> {
+    let r = packs::install(&pack, replace)?;
+    config_changed(&app);
+    Ok(r)
+}
+
+#[tauri::command]
+fn pack_export(name: String, author: String) -> Result<String, String> {
+    let pack = packs::mine(&name, &author);
+    if pack.touches.is_empty() && pack.drawings.is_empty() {
+        return Err("You don't have any touches or drawings to share yet.".into());
+    }
+    packs::export(&pack).map(|p| p.display().to_string())
+}
+
+fn open_pack_file(app: &AppHandle, path: &std::path::Path) {
+    let pack = packs::read(path);
+    *OPENED_PACK.lock().unwrap() = Some(pack.clone());
+    show_settings(app, None);
+    let _ = app.emit_to("settings", "pack-open", pack);
+}
+
+#[tauri::command]
 fn set_enabled(app: AppHandle, enabled: bool) {
     config::update(|c| c.enabled = enabled);
     config_changed(&app);
@@ -188,6 +377,12 @@ fn show_settings(app: &AppHandle, slot: Option<String>) {
         .build()
         .map(|w| {
             let _ = w.set_focus();
+            // Recording a drawing stops when settings closes, so drawings work again.
+            w.on_window_event(|e| {
+                if let WindowEvent::Destroyed = e {
+                    draw::RECORDING.store(false, std::sync::atomic::Ordering::Relaxed);
+                }
+            });
         });
 }
 
@@ -311,22 +506,47 @@ fn main() {
             add_fun_pack,
             clear_all,
             install_update,
+            set_haptics,
+            get_drawing_script,
+            save_drawing,
+            delete_drawing,
+            test_drawing,
+            set_recording,
+            match_stroke,
+            add_drawing_pack,
+            play_fx,
+            take_opened_pack,
+            pack_builtin,
+            pack_from_file,
+            pack_from_url,
+            pack_install,
+            pack_export,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let _ = APP.set(app.handle().clone());
             config::init();
+            ipc::install_cli();
+            ipc::serve();
             build_buddy(app.handle())?;
+            fx::build(app.handle())?;
             build_tray(app.handle())?;
             match start_touch() {
-                Ok(n) => eprintln!("touchroute: listening on {n} trackpad(s)"),
+                Ok(n) => {
+                    #[cfg(target_os = "macos")]
+                    eprintln!("touchroute: listening on {n} trackpad(s), {} with direct haptics", touch_macos::haptic_count());
+                    #[cfg(not(target_os = "macos"))]
+                    eprintln!("touchroute: listening on {n} trackpad(s)");
+                }
                 Err(e) => eprintln!("touchroute: {e}"),
             }
             #[cfg(target_os = "macos")]
             touch_macos::watch();
             watch_config(app.handle().clone());
             watch_updates(app.handle().clone());
+            mood::watch(app.handle().clone());
+            draw::demo();
             if std::env::args().any(|a| a == "--updated") {
                 show_settings(app.handle(), None);
             }
@@ -334,9 +554,18 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("error while building TouchRoute")
-        .run(|_app, event| {
-            if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
+        .run(|app, event| match event {
+            tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
                 config::flush_position();
+                let _ = std::fs::remove_file(ipc::socket_path());
             }
+            // A .touchroute pack double-clicked in Finder.
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Opened { urls } => {
+                if let Some(path) = urls.iter().find_map(|u| u.to_file_path().ok()) {
+                    open_pack_file(app, &path);
+                }
+            }
+            _ => {}
         });
 }

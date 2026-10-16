@@ -38,7 +38,12 @@ Everything you need is in plain files. The app watches them and picks up changes
 - `slots` keys are `"N-S"`. `name` is the label the user sees on their desktop buddy, so keep it to 2 to 4 words. `prompt` is the plain-English request the touch came from (optional, but fill it in so the user can revise it later).
 - `enabled: false` pauses every touch. Don't change it unless asked.
 - The buddy's look: `theme` is `classic`, `dusk` (darker), `neon` (brighter), `cosmic` (glowing galaxy orbs) or `galaxy` (dark space orbs); `style` is `orbs` or `critters` (dots with eyes); `reactivity` runs from 0 (calm) to 2 (hyper). Change these only when the user asks.
-- Leave `buddy_position` and any other fields alone.
+- `haptics` (true/false) turns the trackpad clicks on or off. Change it only when asked.
+- Leave `buddy_position`, `fun_version` and any other fields alone.
+
+### Drawings
+
+The user can also hold **Option** and draw a shape on the trackpad with one finger. Saved drawings are in `config.json` under `drawings`: each has an `id` (lowercase letters, digits and dashes), a `name`, a `prompt`, and `samples` (examples of the shape as `[x, y]` points, y pointing down). Each runs `~/.touchroute/drawings/ID.sh`, with the same script rules as touches. To change what a drawing does, edit its script. New shapes need samples, so have the user draw them in TouchRoute's settings (the **Drawings** tab) rather than writing points by hand.
 
 A touch only exists when it has **both** an entry in `slots` and a script at `scripts/N-S.sh`.
 
@@ -94,7 +99,7 @@ Scripts run in the background in a login shell (`zsh -l` on macOS), from the hom
 - **Never start `claude` (or any tool that scans its folder) in the home folder.** A new Terminal window opens in `~`, and scanning it makes macOS ask for access to Photos, Music, Google Drive and so on. Always `cd` first: into the project the user named, or `~/claude` (create it with `mkdir -p ~/claude` if missing) as a neutral default.
 - **Apps:** `open -a "Spotify"`. **Websites:** `open "https://example.com"`. **Files and folders:** `open ~/Documents/plan.md`.
 - **Several agents or tasks at once:** give each its own Terminal window (one `do script` per window), or background quick commands with `&`.
-- **Emoji effects:** TouchRoute ships `~/.touchroute/fun/fx.js`, which animates emoji over the screen for a few seconds (clicks pass through). `osascript -l JavaScript ~/.touchroute/fun/fx.js MODE "🎉 🎊 ✨" ["caption"]`, where MODE is `pop`, `spin`, `rain`, `burst`, `fireworks`, `float`, `launch` or `banner` (banner needs the text). Pair it with a sound: `afplay /System/Library/Sounds/Glass.aiff &`.
+- **Effects:** for anything fun or celebratory, TouchRoute plays full-screen effects over everything (clicks pass through): `~/.touchroute/bin/touchroute fx MODE ["caption"]`, where MODE is `lightning`, `fire`, `hearts`, `warp`, `matrix`, `confetti`, `fireworks`, `supernova`, `portal`, `aurora`, `neon` (the caption is the sign's text), `bubbles`, `galaxy`, `disco` or `snow`. Emoji effects take the emoji first: `~/.touchroute/bin/touchroute fx MODE "🎉 🎊" ["caption"]` with MODE `pop`, `spin`, `rain`, `burst`, `float`, `launch` or `banner` (banner needs the text). The command returns right away, so put `sleep 2` between effects that should play one after another. Pair them with a sound: `afplay /System/Library/Sounds/Glass.aiff &`. `~/.touchroute/bin/touchroute feel strong` clicks the trackpad. The old `osascript -l JavaScript ~/.touchroute/fun/fx.js MODE "emoji" ["caption"]` still works and hands off to the same effects.
 - **Notifications:** `osascript -e 'display notification "Deployed" with title "TouchRoute"'`.
 - Never use `sudo`. Never delete, overwrite or move the user's files unless they explicitly asked for that touch to do it.
 - Never put passwords, tokens or keys in a script. If the touch needs one, read it from where the user already keeps it (an environment variable, the keychain via `security find-generic-password`, or a CLI that's already logged in).

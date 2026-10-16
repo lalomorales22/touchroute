@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Burst confetti from the middle of the screen.
+# Fire confetti cannons from both bottom corners.
 afplay /System/Library/Sounds/Glass.aiff &
-osascript -l JavaScript ~/.touchroute/fun/fx.js burst "🎉 🎊 ✨ 🥳 🎈"
+~/.touchroute/bin/touchroute fx confetti
 wait

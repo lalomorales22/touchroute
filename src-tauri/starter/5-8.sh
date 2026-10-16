@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Float flowers and remind you to breathe.
+# Northern lights and a reminder to breathe.
 say -v Whisper "breathe in. and out." &
-osascript -l JavaScript ~/.touchroute/fun/fx.js float "🌸 🍃 🌼 🪷 ☁️"
+~/.touchroute/bin/touchroute fx aurora "breathe"
 wait

@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Start a quick disco party with sound.
+# Spin up the disco lights.
 say -v Cellos "dance dance dance dance" &
-osascript -l JavaScript ~/.touchroute/fun/fx.js burst "🪩 🕺 💃 🎶 🌈 ✨"
+~/.touchroute/bin/touchroute fx disco
 wait

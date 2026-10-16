@@ -8,6 +8,8 @@ use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
 use crate::detector::{self, Touch};
+use crate::draw;
+use crate::haptics::Feel;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -48,6 +50,11 @@ type CreateList = unsafe extern "C" fn() -> *const c_void;
 type Register = unsafe extern "C" fn(*mut c_void, FrameCallback);
 type Start = unsafe extern "C" fn(*mut c_void, c_int);
 type Stop = unsafe extern "C" fn(*mut c_void);
+type GetDeviceId = unsafe extern "C" fn(*mut c_void, *mut u64) -> c_int;
+type GetDimensions = unsafe extern "C" fn(*mut c_void, *mut c_int, *mut c_int) -> c_int;
+type ActuatorCreate = unsafe extern "C" fn(u64) -> *mut c_void;
+type ActuatorOpen = unsafe extern "C" fn(*mut c_void) -> c_int;
+type ActuatorActuate = unsafe extern "C" fn(*mut c_void, i32, u32, f32, f32) -> c_int;
 
 extern "C" {
     fn dlopen(path: *const c_char, mode: c_int) -> *mut c_void;
@@ -73,9 +80,25 @@ struct Api {
     unregister: Register,
     start: Start,
     stop: Stop,
+    device_id: GetDeviceId,
+    dimensions: Option<GetDimensions>,
+    actuator_create: Option<ActuatorCreate>,
+    actuator_open: Option<ActuatorOpen>,
+    actuate: Option<ActuatorActuate>,
 }
 
 static DEVICES: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+
+/// The haptic motor of each Force Touch trackpad, keyed by device.
+static ACTUATORS: Mutex<Vec<(usize, usize)>> = Mutex::new(Vec::new());
+/// Every actuator opened so far, by hardware id. Trackpads are rescanned every
+/// minute; reusing these keeps that from opening a new one each time.
+static OPENED: Mutex<Vec<(u64, usize)>> = Mutex::new(Vec::new());
+/// The trackpad a finger last touched, so haptics play under the user's hand.
+static LAST_DEVICE: Mutex<usize> = Mutex::new(0);
+static ACTUATE: Mutex<Option<ActuatorActuate>> = Mutex::new(None);
+/// Width over height of each trackpad's surface, so drawn circles stay round.
+static ASPECT: Mutex<Vec<(usize, f32)>> = Mutex::new(Vec::new());
 
 /// Run with TOUCHROUTE_DEBUG=1 to print every change in what the trackpad
 /// reports: raw contacts, their states, and how many we count.
@@ -107,8 +130,45 @@ extern "C" fn on_frame(device: *mut c_void, data: *const Finger, count: c_int, _
         .filter(|f| f.state == MAKE_TOUCH || f.state == TOUCHING)
         .map(|f| Touch { id: f.identifier, x: f.normalized.pos.x, y: f.normalized.pos.y })
         .collect();
-    detector::on_frame(device as usize, &touches);
+    let device = device as usize;
+    if !touches.is_empty() {
+        *LAST_DEVICE.lock().unwrap() = device;
+    }
+    // While a drawing is under way, the hold detector sees no fingers.
+    if draw::on_frame(device, &touches, aspect(device)) {
+        detector::on_frame(device, &[]);
+    } else {
+        detector::on_frame(device, &touches);
+    }
     0
+}
+
+fn aspect(device: usize) -> f32 {
+    ASPECT.lock().unwrap().iter().find(|(d, _)| *d == device).map_or(1.5, |(_, a)| *a)
+}
+
+/// Clicks the Force Touch trackpad the user's finger is on. Does nothing on
+/// trackpads without a haptic motor.
+pub fn actuate(kind: Feel) {
+    let device = *LAST_DEVICE.lock().unwrap();
+    let actuators = ACTUATORS.lock().unwrap();
+    let found = actuators.iter().find(|(d, _)| *d == device).or(actuators.first()).copied();
+    let (Some(actuate), Some((_, act))) = (*ACTUATE.lock().unwrap(), found) else {
+        // No direct line to the motor (a Bluetooth Magic Trackpad, say): ask
+        // macOS to play its standard feedback instead.
+        drop(actuators);
+        appkit_feedback(kind);
+        return;
+    };
+    let id = match kind {
+        Feel::Light => 3,
+        Feel::Medium => 4,
+        Feel::Strong => 6,
+    };
+    let err = unsafe { actuate(act as *mut c_void, id, 0, 0.0, 0.0) };
+    if err != 0 && *DEBUG {
+        eprintln!("haptic click failed: {err:#x}");
+    }
 }
 
 unsafe fn sym<T: Copy>(handle: *mut c_void, name: &str) -> Result<T, String> {
@@ -133,6 +193,11 @@ fn api() -> Result<Api, String> {
             unregister: sym(handle, "MTUnregisterContactFrameCallback")?,
             start: sym(handle, "MTDeviceStart")?,
             stop: sym(handle, "MTDeviceStop")?,
+            device_id: sym(handle, "MTDeviceGetDeviceID")?,
+            dimensions: sym(handle, "MTDeviceGetSensorSurfaceDimensions").ok(),
+            actuator_create: sym(handle, "MTActuatorCreateFromDeviceID").ok(),
+            actuator_open: sym(handle, "MTActuatorOpen").ok(),
+            actuate: sym(handle, "MTActuatorActuate").ok(),
         })
     }
 }
@@ -151,15 +216,89 @@ pub fn start() -> Result<usize, String> {
         if list.is_null() {
             return Ok(0);
         }
+        let mut actuators = Vec::new();
+        let mut aspects = Vec::new();
         for i in 0..CFArrayGetCount(list) {
             let dev = CFArrayGetValueAtIndex(list, i) as *mut c_void;
             (api.register)(dev, on_frame);
             (api.start)(dev, 0);
             devices.push(dev as usize);
+            if let Some(dims) = api.dimensions {
+                let (mut w, mut h) = (0, 0);
+                if dims(dev, &mut w, &mut h) == 0 && w > 0 && h > 0 {
+                    aspects.push((dev as usize, w as f32 / h as f32));
+                }
+            }
+            let mut id = 0u64;
+            if let (Some(create), Some(open)) = (api.actuator_create, api.actuator_open) {
+                let got = (api.device_id)(dev, &mut id);
+                if *DEBUG {
+                    eprintln!("trackpad {dev:?}: id {id:#x} (status {got})");
+                }
+                if got == 0 {
+                    let mut opened = OPENED.lock().unwrap();
+                    if let Some(&(_, act)) = opened.iter().find(|(i, _)| *i == id) {
+                        actuators.push((dev as usize, act));
+                    } else {
+                        let act = create(id);
+                        let status = if act.is_null() { -1 } else { open(act) };
+                        if *DEBUG {
+                            eprintln!("haptics for {id:#x}: actuator {act:?}, open status {status:#x}");
+                        }
+                        if !act.is_null() && status == 0 {
+                            opened.push((id, act as usize));
+                            actuators.push((dev as usize, act as usize));
+                        }
+                    }
+                }
+            }
         }
+        *ACTUATORS.lock().unwrap() = actuators;
+        *ASPECT.lock().unwrap() = aspects;
+        *ACTUATE.lock().unwrap() = api.actuate;
     }
     detector::reset();
     Ok(devices.len())
+}
+
+#[link(name = "objc")]
+extern "C" {
+    fn objc_getClass(name: *const c_char) -> *mut c_void;
+    fn sel_registerName(name: *const c_char) -> *mut c_void;
+    fn objc_msgSend();
+}
+
+/// NSHapticFeedbackManager.defaultPerformer.performFeedbackPattern(…), on the
+/// main thread. Works on any Force Touch trackpad while a finger is on it.
+fn appkit_feedback(kind: Feel) {
+    let Some(app) = crate::APP.get() else { return };
+    let _ = app.run_on_main_thread(move || unsafe {
+        type Get = extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+        type Perform = extern "C" fn(*mut c_void, *mut c_void, isize, usize);
+        let get: Get = std::mem::transmute(objc_msgSend as *const c_void);
+        let perform: Perform = std::mem::transmute(objc_msgSend as *const c_void);
+        let cls = objc_getClass(c"NSHapticFeedbackManager".as_ptr());
+        if cls.is_null() {
+            return;
+        }
+        let performer = get(cls, sel_registerName(c"defaultPerformer".as_ptr()));
+        if performer.is_null() {
+            return;
+        }
+        // Generic, alignment and level change, from softest to firmest.
+        let pattern = match kind {
+            Feel::Light => 0,
+            Feel::Medium => 1,
+            Feel::Strong => 2,
+        };
+        // Performance time "now".
+        perform(performer, sel_registerName(c"performFeedbackPattern:performanceTime:".as_ptr()), pattern, 1);
+    });
+}
+
+/// How many trackpads have a haptic motor TouchRoute can click.
+pub fn haptic_count() -> usize {
+    ACTUATORS.lock().unwrap().len()
 }
 
 /// Trackpads stop reporting after sleep, and a Magic Trackpad may connect

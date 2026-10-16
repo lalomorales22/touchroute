@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Float bubbles up the screen.
+# Shiny soap bubbles drift up and pop.
 afplay /System/Library/Sounds/Blow.aiff &
-osascript -l JavaScript ~/.touchroute/fun/fx.js float "🫧 🫧 🫧 🐠"
+~/.touchroute/bin/touchroute fx bubbles
 wait

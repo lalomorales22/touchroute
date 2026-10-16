@@ -5,7 +5,7 @@ import { invoke, listen, win, currentMonitor, LogicalSize, LogicalPosition, fing
 // dial: rings are fingers (1 in the middle), spokes are seconds (1s at the
 // top, clockwise), so every touch sits at its own fingers-by-seconds spot.
 
-const COMPACT = 200;
+const COMPACT = 260; // room around the swarm so its glow never reaches the window edge
 const DIAL = 500;
 const RING0 = 72;     // radius of the 1-finger ring (leaves room for the hub)
 const RING_STEP = 15; // distance between rings
@@ -43,10 +43,30 @@ let touch = { ...IDLE };
 let burst = 0;
 let readoutUntil = 0;
 
+// What the Mac is up to (from the app), and the little reactions to it.
+let mood = { away: false, busy: false, battery: null, charging: false };
+let wokeAt = -9;         // when you came back, for the startled hop
+let zapAt = -9;          // when the charger went in
+let slump = 0;           // how far the dots have sunk (asleep or low battery)
+let zs = [];             // floating z's while dozing
+let drops = [];          // sweat while the Mac is busy
+let lastZ = 0;
+
 // ---------- data ----------
+
+function setMood(m) {
+  const t = performance.now() / 1000;
+  if (mood.away && !m.away) { wokeAt = t; burst = Math.max(burst, 0.8); }
+  if (!mood.charging && m.charging && m.battery != null) zapAt = t;
+  mood = m;
+}
+
+// Late at night the buddy gets drowsy too.
+const lateNight = () => { const h = new Date().getHours(); return h >= 23 || h < 6; };
 
 function applyState(s) {
   state = s;
+  if (s.mood) setMood(s.mood);
   style = s.config.style ?? "orbs";
   react = s.config.reactivity ?? 1;
   if (s.config.theme !== theme) {
@@ -277,6 +297,7 @@ listen("touch", ({ payload: p }) => {
 });
 
 listen("config", ({ payload }) => applyState(payload));
+listen("mood", ({ payload }) => setMood(payload));
 
 // ---------- drawing ----------
 
@@ -336,7 +357,7 @@ function bead(x, y, r, f, alpha, lit, seed = 0) {
 
 // Eyes, blinks and a smile on top of a dot. The eyes follow the cursor, watch
 // the middle while fingers are down, and wander otherwise.
-function critterFace(x, y, r, d, alpha, t) {
+function critterFace(x, y, r, d, alpha, t, feel) {
   let tx, ty;
   const holding = touch.phase === "holding" || touch.phase === "settling";
   if (mouse) { tx = mouse.x; ty = mouse.y; }
@@ -347,26 +368,131 @@ function critterFace(x, y, r, d, alpha, t) {
 
   if (t > d.blinkAt) { d.blinkStart = t; d.blinkAt = t + 2 + Math.random() * 5; }
   const since = t - (d.blinkStart ?? -9);
-  const lid = since < 0.16 ? Math.max(0.1, Math.abs(Math.cos((since / 0.16) * Math.PI))) : 1;
+  let lid = since < 0.16 ? Math.max(0.1, Math.abs(Math.cos((since / 0.16) * Math.PI))) : 1;
+  // Drowsy critters yawn now and then, eyes squeezed shut.
+  d.yawnAt ??= t + 4 + Math.random() * 14;
+  if (feel.drowsy && t > d.yawnAt + 1.6) d.yawnAt = t + 8 + Math.random() * 14;
+  const yawn = feel.drowsy && t > d.yawnAt ? Math.sin(Math.min(1, (t - d.yawnAt) / 1.6) * Math.PI) : 0;
+  if (feel.drowsy) lid = Math.min(lid, 0.55);
+  const closed = feel.asleep || yawn > 0.3;
+  const wide = feel.surprised ? 1.25 : 1;
+  const ink = isGalaxy() ? `rgba(235,235,245,${0.75 * alpha})` : `rgba(20,20,26,${0.75 * alpha})`;
+  ctx.lineCap = "round";
 
   for (const side of [-1, 1]) {
     const ex = x + side * r * 0.36, ey = y - r * 0.12;
+    if (closed) {
+      // Shut eyes: two little downward curves.
+      ctx.strokeStyle = ink;
+      ctx.lineWidth = Math.max(0.8, r * 0.09);
+      ctx.beginPath(); ctx.arc(ex, ey - r * 0.05, r * 0.2, Math.PI * 0.15, Math.PI * 0.85); ctx.stroke();
+      continue;
+    }
     ctx.fillStyle = `rgba(255,255,255,${alpha})`;
-    ctx.beginPath(); ctx.ellipse(ex, ey, r * 0.3, r * 0.36 * lid, 0, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(ex, ey, r * 0.3 * wide, r * 0.36 * lid * wide, 0, 0, 7); ctx.fill();
     if (lid > 0.45) {
-      const px = ex + Math.cos(look) * r * 0.12 * reach, py = ey + Math.sin(look) * r * 0.14 * reach;
+      const px = ex + Math.cos(look) * r * 0.12 * reach, py = ey + Math.sin(look) * r * 0.14 * reach * lid;
       ctx.fillStyle = `rgba(14,14,18,${alpha})`;
-      ctx.beginPath(); ctx.arc(px, py, r * 0.16, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(px, py, r * (feel.surprised ? 0.1 : 0.16), 0, 7); ctx.fill();
       ctx.fillStyle = `rgba(255,255,255,${0.9 * alpha})`;
       ctx.beginPath(); ctx.arc(px - r * 0.05, py - r * 0.06, r * 0.05, 0, 7); ctx.fill();
     }
   }
-  // A small smile that grows into a grin when a touch fires.
-  const grin = Math.min(1, burst * 1.5);
-  ctx.strokeStyle = isGalaxy() ? `rgba(235,235,245,${0.7 * alpha})` : `rgba(20,20,26,${0.75 * alpha})`;
+  ctx.strokeStyle = ink;
+  ctx.fillStyle = ink;
   ctx.lineWidth = Math.max(0.8, r * 0.1);
-  ctx.lineCap = "round";
-  ctx.beginPath(); ctx.arc(x, y + r * 0.2, r * (0.2 + grin * 0.12), Math.PI * (0.18 - grin * 0.08), Math.PI * (0.82 + grin * 0.08)); ctx.stroke();
+  if (feel.asleep) {
+    // A little "o" that breathes in and out.
+    const b = 0.6 + 0.4 * Math.sin(t * 1.4 + d.seed);
+    ctx.beginPath(); ctx.ellipse(x, y + r * 0.32, r * 0.08 * b, r * 0.1 * b, 0, 0, 7); ctx.fill();
+  } else if (yawn > 0.05 || feel.surprised) {
+    const o = feel.surprised ? 0.7 : yawn;
+    ctx.beginPath(); ctx.ellipse(x, y + r * 0.32, r * 0.12 * (0.6 + o * 0.4), r * 0.2 * o, 0, 0, 7); ctx.fill();
+  } else if (feel.busy) {
+    // A wobbly, worried mouth.
+    ctx.beginPath();
+    for (let i = 0; i <= 8; i++) {
+      const mx = x - r * 0.22 + (i / 8) * r * 0.44, my = y + r * 0.32 + Math.sin(i * 1.6 + t * 8) * r * 0.04;
+      i ? ctx.lineTo(mx, my) : ctx.moveTo(mx, my);
+    }
+    ctx.stroke();
+  } else {
+    // A small smile that grows into a grin when a touch fires.
+    const grin = Math.min(1, burst * 1.5);
+    ctx.beginPath(); ctx.arc(x, y + r * 0.2, r * (0.2 + grin * 0.12), Math.PI * (0.18 - grin * 0.08), Math.PI * (0.82 + grin * 0.08)); ctx.stroke();
+  }
+}
+
+// ---------- moods ----------
+
+// Floating z's rise off a dozing buddy.
+function drawZs(t, dt, c, feel) {
+  const every = feel.asleep ? 1.3 : feel.drowsy ? 7 : Infinity;
+  if (t - lastZ > every) {
+    lastZ = t;
+    zs.push({ t0: t, x: c.x + 18 + Math.random() * 10, y: c.y - 22 });
+  }
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  zs = zs.filter((z) => t - z.t0 < 2.6);
+  for (const z of zs) {
+    const k = (t - z.t0) / 2.6;
+    const size = 9 + k * 10;
+    ctx.font = `700 ${size}px ${displayFont}`;
+    ctx.fillStyle = `rgba(235,238,245,${0.85 * Math.sin(k * Math.PI)})`;
+    ctx.shadowColor = "rgba(0,0,0,0.6)";
+    ctx.shadowBlur = 4;
+    ctx.fillText("z", z.x + k * 26 + Math.sin(k * 7) * 4, z.y - k * 46);
+  }
+  ctx.shadowBlur = 0;
+}
+
+// Sweat drops slide off the dots while the Mac is working hard.
+function drawSweat(t, dt, feel) {
+  if (feel.busy && dots.length && Math.random() < dt * 3) {
+    const d = dots[Math.floor(Math.random() * dots.length)];
+    drops.push({ x: d.x + (Math.random() < 0.5 ? -1 : 1) * 8, y: d.y - 6, vy: 0, t0: t });
+  }
+  drops = drops.filter((p) => t - p.t0 < 1);
+  for (const p of drops) {
+    p.vy += 60 * dt;
+    p.y += p.vy * dt;
+    const a = 1 - (t - p.t0);
+    ctx.fillStyle = `rgba(150,205,255,${0.9 * a})`;
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y - 6);
+    ctx.quadraticCurveTo(p.x + 4.5, p.y + 1.5, p.x, p.y + 4);
+    ctx.quadraticCurveTo(p.x - 4.5, p.y + 1.5, p.x, p.y - 6);
+    ctx.fill();
+    ctx.fillStyle = `rgba(255,255,255,${0.8 * a})`;
+    ctx.beginPath(); ctx.arc(p.x - 1.2, p.y + 0.5, 1, 0, 7); ctx.fill();
+  }
+}
+
+// A startled "!" when you come back, and a zap when the charger goes in.
+function drawSurprise(t, c) {
+  const k = (t - wokeAt) / 1.3;
+  if (k >= 0 && k < 1) {
+    const s = Math.min(1, k * 5) * (1 - Math.max(0, (k - 0.7) / 0.3));
+    ctx.font = `800 ${22 * (0.6 + 0.4 * Math.min(1, k * 4))}px ${displayFont}`;
+    ctx.textAlign = "center";
+    ctx.fillStyle = `rgba(255,236,150,${s})`;
+    ctx.shadowColor = "rgba(0,0,0,0.6)";
+    ctx.shadowBlur = 4;
+    ctx.fillText("!", c.x, c.y - 52 - Math.sin(k * Math.PI) * 6);
+    ctx.shadowBlur = 0;
+  }
+  const z = (t - zapAt) / 0.9;
+  if (z >= 0 && z < 1) {
+    ctx.strokeStyle = `rgba(255,225,90,${1 - z})`;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = "round";
+    for (let i = 0; i < 3; i++) {
+      const a = i * 2.1 + z * 2, r0 = 30 + z * 30;
+      const x = c.x + Math.cos(a) * r0, y = c.y + Math.sin(a) * r0;
+      ctx.beginPath(); ctx.moveTo(x, y - 8); ctx.lineTo(x - 4, y); ctx.lineTo(x + 3, y); ctx.lineTo(x - 1, y + 8); ctx.stroke();
+    }
+  }
 }
 
 // ---------- cosmic theme ----------
@@ -594,6 +720,16 @@ function frame(now) {
   const c = clusterCenter();
   const counting = touch.phase === "holding";
   const elapsed = counting ? touch.elapsed + (now - touch.at) / 1000 : 0;
+  // How the buddy feels right now.
+  const asleep = mood.away && !open && !holding;
+  const feel = {
+    asleep,
+    drowsy: !asleep && (lateNight() || (mood.battery != null && mood.battery <= 15 && !mood.charging)),
+    busy: mood.busy && !asleep,
+    surprised: t - wokeAt < 1.3,
+  };
+  const pace = feel.asleep ? 0.12 : feel.drowsy ? 0.55 : feel.busy ? 1.7 : 1;
+  slump += ((feel.asleep ? 6 : feel.drowsy ? 3 : 0) - slump) * (1 - Math.exp(-dt * 1.5));
   // Reactiveness scales how much the dots wobble, hop, lean and react.
   const R = reduced ? 0 : react;
   const breathe = 1 + Math.sin(t * 1.2) * 0.06 * (0.4 + 0.6 * R);
@@ -607,14 +743,14 @@ function frame(now) {
   // Living positions: each dot orbits, wobbles, breathes, hops now and then,
   // and leans a little toward the cursor.
   const live = (d, amp) => {
-    d.angle += d.speed * dt * (holding ? 1 + 2 * R : 0.5 + 0.5 * R);
+    d.angle += d.speed * dt * (holding ? 1 + 2 * R : 0.5 + 0.5 * R) * pace;
     if (t > d.hopAt) d.hopAt = t + (4 + Math.random() * 9) / (0.3 + 0.7 * R);
     const sinceHop = t - d.hopAt + 4 / (0.3 + 0.7 * R);
-    const hop = reduced ? 0 : Math.max(0, Math.sin(Math.min(1, Math.max(0, sinceHop / 0.45)) * Math.PI)) * (sinceHop < 0.45 ? 1 : 0);
+    const hop = reduced || feel.asleep ? 0 : Math.max(0, Math.sin(Math.min(1, Math.max(0, sinceHop / 0.45)) * Math.PI)) * (sinceHop < 0.45 ? 1 : 0);
     const wob = reduced ? 0 : (Math.sin(t * 1.7 + d.seed) * 4 * amp + Math.sin(t * 0.6 + d.seed * 2) * 3 * amp) * (0.3 + 0.7 * R);
-    const r = (d.orbit * breathe + wob) * squeeze * (1 + burst * 0.8 * R);
-    let x = c.x + Math.cos(d.angle) * r;
-    let y = c.y + Math.sin(d.angle) * r * 0.88 - hop * 6 * R;
+    const r = (d.orbit * breathe + wob * (feel.asleep ? 0.3 : 1)) * squeeze * (feel.asleep ? 0.85 : 1) * (1 + burst * 0.8 * R);
+    let x = c.x + Math.cos(d.angle) * r + (feel.busy ? Math.sin(t * 37 + d.seed * 9) * 0.7 : 0);
+    let y = c.y + Math.sin(d.angle) * r * 0.88 - hop * 6 * R + slump;
     if (mouse && !open) { x += (mouse.x - x) * 0.07 * R; y += (mouse.y - y) * 0.07 * R; }
     d.lx += (x - d.lx) * follow;
     d.ly += (y - d.ly) * follow;
@@ -668,19 +804,24 @@ function frame(now) {
     drawTrail(d, size, alpha);
     if (critters) {
       // Squash and stretch, so each critter wiggles.
-      const wig = Math.sin(t * (4 + R * 3) + d.seed * 5) * 0.09 * (0.3 + 0.7 * R);
+      const wig = Math.sin(t * (4 + R * 3) * pace + d.seed * 5) * 0.09 * (0.3 + 0.7 * R) * (feel.asleep ? 0.4 : 1);
       ctx.save();
       ctx.translate(d.x, d.y);
       ctx.scale(1 + wig, 1 - wig);
       ctx.translate(-d.x, -d.y);
       bead(d.x, d.y, size, d.f, alpha, d.lit, d.seed);
       ctx.restore();
-      critterFace(d.x, d.y - size * wig * 0.5, size * (isGalaxy() ? 1.25 : 1), d, alpha, t);
+      critterFace(d.x, d.y - size * wig * 0.5, size * (isGalaxy() ? 1.25 : 1), d, alpha, t, feel);
     } else {
       bead(d.x, d.y, size, d.f, alpha, d.lit, d.seed);
     }
   }
   drawPop(t, c);
+  if (!open && openT === 0) {
+    drawZs(t, dt, c, feel);
+    drawSweat(t, dt, feel);
+    drawSurprise(t, c);
+  }
 
   if (counting || touch.phase === "fired") {
     if (openT > 0) {

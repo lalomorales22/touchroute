@@ -2,7 +2,9 @@
 //   config.json        which slots exist and what they're called
 //   scripts/F-S.sh     the script each slot runs (plain files, edit freely)
 //   logs/F-S.log       output from the last run
-//   fun/fx.js          the emoji effects the fun pack's scripts use
+//   drawings/ID.sh     the script each saved drawing runs
+//   bin/touchroute     a command scripts use to play effects on screen
+//   fun/fx.js          the old emoji effects; now hands off to the app
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -34,6 +36,26 @@ pub struct Config {
     /// How lively the dots are, from 0 (calm) to 2 (hyper).
     #[serde(default = "one")]
     pub reactivity: f64,
+    /// Tap the trackpad as each second passes and when a touch fires.
+    #[serde(default = "yes")]
+    pub haptics: bool,
+    /// Shapes drawn on the trackpad (hold Option, draw with one finger).
+    #[serde(default)]
+    pub drawings: Vec<Drawing>,
+    /// Which version of the fun pack this install has seen, so new versions
+    /// can upgrade the touches it added without touching the user's own.
+    #[serde(default)]
+    pub fun_version: u32,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct Drawing {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub prompt: String,
+    /// One or more examples of the shape, each a list of points.
+    pub samples: Vec<Vec<[f32; 2]>>,
 }
 
 fn classic() -> String {
@@ -44,6 +66,9 @@ fn orbs() -> String {
 }
 fn one() -> f64 {
     1.0
+}
+fn yes() -> bool {
+    true
 }
 
 pub const THEMES: [&str; 5] = ["classic", "dusk", "neon", "cosmic", "galaxy"];
@@ -98,6 +123,19 @@ pub fn script_path(key: &str) -> PathBuf {
     scripts_dir().join(format!("{key}.sh"))
 }
 
+pub fn drawings_dir() -> PathBuf {
+    home().join("drawings")
+}
+
+pub fn drawing_path(id: &str) -> PathBuf {
+    drawings_dir().join(format!("{id}.sh"))
+}
+
+/// Drawing ids come from the UI and from packs; keep them to a-z, 0-9 and -.
+pub fn valid_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 40 && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
 pub fn slot_key(fingers: usize, seconds: u32) -> String {
     format!("{fingers}-{seconds}")
 }
@@ -150,6 +188,7 @@ pub fn reload_if_changed() -> bool {
 pub fn init() {
     let _ = fs::create_dir_all(scripts_dir());
     let _ = fs::create_dir_all(logs_dir());
+    let _ = fs::create_dir_all(drawings_dir());
     write_fx();
     let first_run = read_disk().is_none();
     let cfg = read_disk().unwrap_or_else(|| {
@@ -157,13 +196,90 @@ pub fn init() {
         let mut slots = BTreeMap::new();
         slots.insert("5-5".into(), Slot { name: "Talk to Claude".into(), prompt: "Open Terminal and start claude".into() });
         let _ = write_script("5-5", TALK_TO_CLAUDE);
-        Config { enabled: true, slots, buddy_position: None, theme: classic(), style: orbs(), reactivity: one() }
+        Config {
+            enabled: true,
+            slots,
+            buddy_position: None,
+            theme: classic(),
+            style: orbs(),
+            reactivity: one(),
+            haptics: true,
+            drawings: Vec::new(),
+            fun_version: crate::starter::FUN_VERSION,
+        }
     });
     *CONFIG.lock().unwrap() = Some(cfg);
     if first_run {
         add_fun_pack();
+        add_drawing_pack();
+    } else {
+        upgrade_fun_pack();
     }
     save();
+}
+
+/// Brings an older fun pack up to date: touches whose script is still exactly
+/// what an earlier version wrote get the new script (and name, unless renamed),
+/// new fun touches fill empty squares, and the drawing pack arrives once.
+fn upgrade_fun_pack() {
+    if get().fun_version >= crate::starter::FUN_VERSION {
+        return;
+    }
+    let mut used_pack = false;
+    update(|c| {
+        for (key, old_name, old_script) in crate::starter::LEGACY {
+            let unchanged = fs::read_to_string(script_path(key)).is_ok_and(|s| s == *old_script);
+            let Some((_, name, prompt, script)) = crate::starter::SLOTS.iter().find(|s| s.0 == *key) else { continue };
+            if !unchanged || write_script(key, script).is_err() {
+                continue;
+            }
+            used_pack = true;
+            if let Some(slot) = c.slots.get_mut(*key) {
+                if slot.name == *old_name {
+                    slot.name = name.to_string();
+                    slot.prompt = prompt.to_string();
+                }
+            }
+        }
+        c.fun_version = crate::starter::FUN_VERSION;
+    });
+    if used_pack {
+        for (key, name, prompt, script) in crate::starter::NEW_IN_LATEST {
+            update(|c| {
+                if !c.slots.contains_key(*key) && write_script(key, script).is_ok() {
+                    c.slots.insert(key.to_string(), Slot { name: name.to_string(), prompt: prompt.to_string() });
+                }
+            });
+        }
+    }
+    if get().drawings.is_empty() {
+        add_drawing_pack();
+    }
+}
+
+/// Adds the starter drawings the user doesn't have yet (matched by id).
+pub fn add_drawing_pack() -> usize {
+    let mut added = 0;
+    update(|c| {
+        for (id, name, prompt, shape, script) in crate::starter::DRAWINGS {
+            if c.drawings.iter().any(|d| d.id == *id) || write_drawing(id, script).is_err() {
+                continue;
+            }
+            c.drawings.push(Drawing {
+                id: id.to_string(),
+                name: name.to_string(),
+                prompt: prompt.to_string(),
+                samples: vec![crate::draw::shape(shape)],
+            });
+            added += 1;
+        }
+    });
+    added
+}
+
+pub fn write_drawing(id: &str, body: &str) -> std::io::Result<()> {
+    let _ = fs::create_dir_all(drawings_dir());
+    write_exec(&drawing_path(id), body)
 }
 
 fn write_fx() {
@@ -228,12 +344,15 @@ pub fn flush_position() {
 }
 
 pub fn write_script(key: &str, body: &str) -> std::io::Result<()> {
-    let path = script_path(key);
-    fs::write(&path, body)?;
+    write_exec(&script_path(key), body)
+}
+
+pub fn write_exec(path: &std::path::Path, body: &str) -> std::io::Result<()> {
+    fs::write(path, body)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755))?;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755))?;
     }
     Ok(())
 }

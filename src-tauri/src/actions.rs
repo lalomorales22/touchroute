@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use crate::config;
@@ -11,18 +12,22 @@ const SHELL: &str = "/bin/bash";
 /// Runs a slot's script in a login shell (so the user's PATH works, the same
 /// as in their terminal), in the background, logging to ~/.touchroute/logs.
 pub fn run(key: &str) {
-    let script = config::script_path(key);
+    run_file(&config::script_path(key), key);
+}
+
+/// Runs any script the same way, logging to logs/LOG.log.
+pub fn run_file(script: &Path, log: &str) {
     if !script.exists() {
         return;
     }
-    let log = File::create(config::logs_dir().join(format!("{key}.log"))).ok();
+    let log = File::create(config::logs_dir().join(format!("{log}.log"))).ok();
     let (out, err) = match log.and_then(|f| f.try_clone().ok().map(|g| (f, g))) {
         Some((f, g)) => (Stdio::from(f), Stdio::from(g)),
         None => (Stdio::null(), Stdio::null()),
     };
     let child = Command::new(SHELL)
         .arg("-l")
-        .arg(&script)
+        .arg(script)
         .current_dir(std::env::var("HOME").unwrap_or_else(|_| "/".into()))
         .stdin(Stdio::null())
         .stdout(out)

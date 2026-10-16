@@ -17,6 +17,7 @@ use std::time::Instant;
 use serde::Serialize;
 use tauri::Emitter;
 
+use crate::haptics::{self, Feel};
 use crate::{actions, config, APP};
 
 #[derive(Clone, Copy)]
@@ -53,6 +54,8 @@ struct State {
     anchors: HashMap<i32, (f32, f32)>,
     per_device: HashMap<usize, Vec<Touch>>,
     last_emit: Option<Instant>,
+    /// The last whole second a haptic tick marked.
+    ticked: u32,
 }
 
 /// The finger count must hold steady this long before it's trusted. Time spent
@@ -105,6 +108,7 @@ pub fn on_frame(device: usize, touches: &[Touch]) {
         anchors: HashMap::new(),
         per_device: HashMap::new(),
         last_emit: None,
+        ticked: 0,
     });
 
     // Combine every trackpad (built-in + Magic Trackpad) into one view.
@@ -120,6 +124,7 @@ pub fn on_frame(device: usize, touches: &[Touch]) {
         due
     };
     let mut fire: Option<(usize, f64)> = None;
+    let mut tick: Option<Feel> = None;
 
     match s.phase {
         Phase::Idle => {
@@ -142,6 +147,7 @@ pub fn on_frame(device: usize, touches: &[Touch]) {
                 // The clock started when this count landed, not now, so the
                 // seconds match what the user is counting in their head.
                 s.phase = Phase::Holding;
+                s.ticked = 0;
                 s.anchors = anchors(&all);
                 s.last_emit = Some(now);
                 emit("holding", n, secs(s.since, now), None);
@@ -171,11 +177,24 @@ pub fn on_frame(device: usize, touches: &[Touch]) {
                 for t in &all {
                     s.anchors.entry(t.id).or_insert((t.x, t.y));
                 }
+                let sec = elapsed.floor() as u32;
                 if moved || elapsed >= (MAX_SECONDS + 1) as f64 {
                     s.phase = Phase::Cancelled;
                     emit("cancelled", s.fingers, elapsed, None);
-                } else if throttle(s) {
-                    emit("holding", s.fingers, elapsed, None);
+                } else {
+                    // Tap the trackpad as each second passes, firmer on a
+                    // square that has a touch, so you can feel where you are.
+                    if sec > s.ticked && (1..=MAX_SECONDS).contains(&sec) {
+                        s.ticked = sec;
+                        let cfg = config::get();
+                        if cfg.enabled {
+                            let set = cfg.slots.contains_key(&config::slot_key(s.fingers, sec));
+                            tick = Some(if set { Feel::Medium } else { Feel::Light });
+                        }
+                    }
+                    if throttle(s) {
+                        emit("holding", s.fingers, elapsed, None);
+                    }
                 }
             }
         }
@@ -202,6 +221,9 @@ pub fn on_frame(device: usize, touches: &[Touch]) {
     }
 
     drop(guard);
+    if let Some(kind) = tick {
+        haptics::feel(kind);
+    }
     if let Some((fingers, held)) = fire {
         finish(fingers, held);
     }
@@ -216,6 +238,7 @@ fn finish(fingers: usize, held: f64) {
     let key = config::slot_key(fingers, seconds);
     let cfg = config::get();
     if cfg.enabled && cfg.slots.contains_key(&key) {
+        haptics::double(Feel::Strong);
         actions::run(&key);
         emit("fired", fingers, held, Some(key));
     } else {

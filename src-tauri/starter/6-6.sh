@@ -1,5 +1,7 @@
 #!/bin/zsh
 # Confetti and a birthday song.
 say -v "Good News" "happy birthday to you" &
-osascript -l JavaScript ~/.touchroute/fun/fx.js burst "🎂 🎁 🎈 🎉 🥳"
+~/.touchroute/bin/touchroute fx burst "🎂 🎁 🎈 🎉 🥳" "happy birthday"
+sleep 0.4
+~/.touchroute/bin/touchroute fx confetti
 wait

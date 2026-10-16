@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "windows": ["buddy", "settings"],
+  "windows": ["buddy", "settings", "fx"],
   "permissions": [
     "core:default",
     "core:window:allow-set-size",

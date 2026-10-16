@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Pop a big fire emoji.
-afplay /System/Library/Sounds/Pop.aiff &
-osascript -l JavaScript ~/.touchroute/fun/fx.js pop "🔥" "that's fire"
+# Flames roar up from the bottom of the screen.
+afplay /System/Library/Sounds/Funk.aiff &
+~/.touchroute/bin/touchroute fx fire "that's fire"
 wait

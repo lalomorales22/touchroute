@@ -1,6 +1,9 @@
 #!/bin/zsh
-# Fireworks, then a rain of celebration.
+# Everything at once: a supernova, fireworks, then confetti.
 afplay /System/Library/Sounds/Hero.aiff &
-osascript -l JavaScript ~/.touchroute/fun/fx.js fireworks "🎆 🎇 ✨ 💥"
-osascript -l JavaScript ~/.touchroute/fun/fx.js rain "🎉 🎊 🥳 🏆"
+~/.touchroute/bin/touchroute fx supernova
+sleep 1.2
+~/.touchroute/bin/touchroute fx fireworks
+sleep 2.5
+~/.touchroute/bin/touchroute fx confetti "GRAND FINALE"
 wait

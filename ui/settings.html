@@ -25,6 +25,14 @@
 
   <main>
     <section class="board">
+      <nav class="tabs" role="tablist" aria-label="Sections">
+        <button type="button" role="tab" data-tab="touches" aria-selected="true">Touches</button>
+        <button type="button" role="tab" data-tab="drawings">Drawings</button>
+        <button type="button" role="tab" data-tab="effects">Effects</button>
+        <button type="button" role="tab" data-tab="packs">Packs</button>
+      </nav>
+
+      <div class="page" id="page-touches">
       <h1>Rows are fingers. Columns are seconds.</h1>
       <p class="lede">Pick a square, tell it what to do, then hold that many fingers still for that many seconds and let go.</p>
       <div class="look">
@@ -42,6 +50,11 @@
           <input type="range" id="react" min="0" max="2" step="0.05" aria-label="Reactiveness">
           <span>Hyper</span>
         </label>
+        <label class="mini-switch" title="Feel a click as each second passes, firmer on a square that has a touch">
+          <input type="checkbox" id="haptics">
+          <span class="track"><span class="knob"></span></span>
+          <span>Trackpad clicks</span>
+        </label>
       </div>
       <div class="grid-wrap">
         <div class="grid" id="grid" role="grid" aria-label="Touch slots"></div>
@@ -52,16 +65,84 @@
         <button type="button" class="btn quiet" id="clearAll">Clear all</button>
         <span class="status" id="boardStatus" role="status"></span>
       </div>
+      </div>
+
+      <div class="page" id="page-drawings" hidden>
+        <h1>Draw a shape to run anything.</h1>
+        <p class="lede">Hold <kbd>⌥ Option</kbd> and draw on your trackpad with one finger, then lift. Your stroke glows on screen, and if it matches a drawing below, that drawing runs.</p>
+        <div class="draw-grid" id="drawGrid"></div>
+        <div class="board-foot">
+          <button type="button" class="btn" id="newDrawing">New drawing</button>
+          <button type="button" class="btn" id="drawPack">Add drawing pack</button>
+          <span class="status" id="drawStatus" role="status"></span>
+        </div>
+      </div>
+
+      <div class="page" id="page-effects" hidden>
+        <h1>Effects for your scripts.</h1>
+        <p class="lede">Click one to see it on your screen. Any touch or drawing can play them with the command underneath, and Claude knows how to use them too.</p>
+        <div class="fx-grid" id="fxGrid"></div>
+        <p class="note" id="fxCmd">Click an effect to see its command.</p>
+      </div>
+
+      <div class="page" id="page-packs" hidden>
+        <h1>Share your touches.</h1>
+        <p class="lede">A pack is one <code>.touchroute</code> file holding touches and drawings. Send yours to a friend, post it on GitHub, or add someone else's.</p>
+        <div class="pack-cards">
+          <div class="card">
+            <h2>Share yours</h2>
+            <label class="field"><span>Pack name</span><input id="packName" maxlength="60" placeholder="My touches"></label>
+            <label class="field"><span>Made by</span><input id="packAuthor" maxlength="60" placeholder="Your name (optional)"></label>
+            <div class="ask-row">
+              <button type="button" class="btn primary" id="exportPack">Save pack to Desktop</button>
+              <span class="status" id="exportStatus" role="status"></span>
+            </div>
+          </div>
+          <div class="card">
+            <h2>Add a pack</h2>
+            <button type="button" class="btn" id="openPack">Choose a .touchroute file…</button>
+            <div class="field">
+              <span>Or paste a link (GitHub, a gist, any https address)</span>
+              <div class="quick">
+                <input id="packUrl" placeholder="https://github.com/…/my-pack.touchroute">
+                <button type="button" class="btn" id="getPack">Get it</button>
+              </div>
+            </div>
+            <span class="status" id="importStatus" role="status"></span>
+            <p class="hint">You can also double-click a <code>.touchroute</code> file in Finder.</p>
+          </div>
+        </div>
+        <h2 class="section">Comes with TouchRoute</h2>
+        <div class="pack-cards">
+          <button type="button" class="card pack-tile" data-builtin="fun">
+            <span class="pack-art fun" aria-hidden="true"></span>
+            <b>Fun pack</b><span>Lightning, fireworks, warp speed, the Matrix, a magic 8 ball and more.</span>
+          </button>
+          <button type="button" class="card pack-tile" data-builtin="drawings">
+            <span class="pack-art draw" aria-hidden="true"></span>
+            <b>Drawing pack</b><span>A heart, circle, star, check mark, lightning bolt, spiral and triangle.</span>
+          </button>
+        </div>
+      </div>
     </section>
 
     <aside class="editor" id="editor">
       <div class="blank" id="blank">
         <div class="blank-art" aria-hidden="true"></div>
-        <p>Choose a square on the left to set up a touch.</p>
+        <p id="blankText">Choose a square on the left to set up a touch.</p>
         <p class="hint">Try a 5·5 for opening Claude: five fingers, five seconds.</p>
       </div>
 
       <form id="form" hidden autocomplete="off">
+        <div class="pad-wrap" id="padWrap" hidden>
+          <canvas id="pad" width="680" height="400"></canvas>
+          <div class="pad-hint" id="padHint">Hold <kbd>⌥ Option</kbd> and draw on your trackpad, or draw here with your mouse. Draw it two or three times so it learns your style.</div>
+          <div class="pad-tools">
+            <span class="samples" id="samples"></span>
+            <button type="button" class="link" id="padClear">Start over</button>
+          </div>
+        </div>
+
         <div class="slot-head">
           <div class="slot-code" id="slotCode"></div>
           <div>
@@ -120,6 +201,31 @@
       </form>
     </aside>
   </main>
+  <dialog class="pack-dialog" id="packDialog">
+    <form method="dialog" class="pack-preview">
+      <div class="pp-head">
+        <div>
+          <h2 id="ppName"></h2>
+          <div class="pp-by" id="ppBy"></div>
+        </div>
+        <button class="link" value="cancel" aria-label="Close">Close</button>
+      </div>
+      <p class="pp-desc" id="ppDesc"></p>
+      <div class="pp-grid" id="ppGrid"></div>
+      <div class="pp-draws" id="ppDraws"></div>
+      <p class="pp-conflict" id="ppConflict"></p>
+      <details class="script">
+        <summary><span>See every script in this pack</span></summary>
+        <pre class="pp-scripts" id="ppScripts"></pre>
+      </details>
+      <p class="pp-warn">Packs run scripts on your Mac. Only add packs from people you trust.</p>
+      <div class="actions">
+        <button type="button" class="btn primary" id="ppAdd" autofocus>Add to empty squares</button>
+        <button type="button" class="btn" id="ppReplace">Add and replace mine</button>
+        <span class="status" id="ppStatus" role="status"></span>
+      </div>
+    </form>
+  </dialog>
 <script type="module" src="settings.js"></script>
 </body>
 </html>

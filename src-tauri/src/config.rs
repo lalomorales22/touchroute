@@ -25,16 +25,29 @@ pub struct Config {
     pub slots: BTreeMap<String, Slot>,
     #[serde(default)]
     pub buddy_position: Option<(f64, f64)>,
-    /// Orb color theme: classic, dusk, neon or cosmic.
+    /// Orb color theme: classic, dusk, neon, cosmic or galaxy.
     #[serde(default = "classic")]
     pub theme: String,
+    /// What the buddy's dots look like: plain "orbs", or "critters" with eyes.
+    #[serde(default = "orbs")]
+    pub style: String,
+    /// How lively the dots are, from 0 (calm) to 2 (hyper).
+    #[serde(default = "one")]
+    pub reactivity: f64,
 }
 
 fn classic() -> String {
     "classic".into()
 }
+fn orbs() -> String {
+    "orbs".into()
+}
+fn one() -> f64 {
+    1.0
+}
 
-pub const THEMES: [&str; 4] = ["classic", "dusk", "neon", "cosmic"];
+pub const THEMES: [&str; 5] = ["classic", "dusk", "neon", "cosmic", "galaxy"];
+pub const STYLES: [&str; 2] = ["orbs", "critters"];
 
 static CONFIG: Mutex<Option<Config>> = Mutex::new(None);
 /// Where the buddy was dragged to; folded into config.json on the next save.
@@ -144,7 +157,7 @@ pub fn init() {
         let mut slots = BTreeMap::new();
         slots.insert("5-5".into(), Slot { name: "Talk to Claude".into(), prompt: "Open Terminal and start claude".into() });
         let _ = write_script("5-5", TALK_TO_CLAUDE);
-        Config { enabled: true, slots, buddy_position: None, theme: classic() }
+        Config { enabled: true, slots, buddy_position: None, theme: classic(), style: orbs(), reactivity: one() }
     });
     *CONFIG.lock().unwrap() = Some(cfg);
     if first_run {

@@ -396,6 +396,12 @@ listen("update", ({ payload }) => showUpdate(payload));
 function swatchFill(name) {
   const t = THEMES[name];
   const col = ([h, s]) => `hsl(${h}, ${s}%, ${t.light ? t.light(72) : 72}%)`;
+  if (t.galaxy === "dark") {
+    return `radial-gradient(circle at 30% 40%, rgba(255,255,255,0.7) 0 0.8px, transparent 1.2px),
+      radial-gradient(circle at 68% 62%, rgba(255,255,255,0.5) 0 0.7px, transparent 1px),
+      radial-gradient(circle at 55% 45%, ${col(t.tones[1])} 0, transparent 40%),
+      radial-gradient(circle, #0d0d1a, #000)`;
+  }
   if (t.galaxy) {
     return `radial-gradient(circle at 35% 35%, #fff 0 1px, transparent 1.5px),
       radial-gradient(circle at 65% 60%, ${col(t.tones[3])} 0, transparent 45%),
@@ -413,15 +419,35 @@ for (const name of Object.keys(THEMES)) {
   b.title = `${THEMES[name].label} orbs`;
   b.setAttribute("role", "radio");
   b.style.setProperty("--sw", swatchFill(name));
-  b.onclick = () => invoke("set_theme", { theme: name });
+  b.onclick = () => invoke("set_look", { theme: name });
   $("themes").appendChild(b);
 }
+
+$("shuffle").onclick = () => {
+  const btn = $("shuffle");
+  btn.classList.remove("roll"); void btn.offsetWidth; btn.classList.add("roll");
+  const others = Object.keys(THEMES).filter((n) => n !== theme);
+  invoke("set_look", { theme: others[Math.floor(Math.random() * others.length)] });
+};
+
+document.querySelectorAll("#styles button").forEach((b) => {
+  b.onclick = () => invoke("set_look", { style: b.dataset.style });
+});
+
+// Send the slider's value while dragging, but at most every 80ms.
+let reactTimer = null;
+$("react").addEventListener("input", (e) => {
+  clearTimeout(reactTimer);
+  reactTimer = setTimeout(() => invoke("set_look", { reactivity: Number(e.target.value) }), 80);
+});
 
 // ---------- state ----------
 
 let theme = null;
 function applyState(s) {
   state = s;
+  document.querySelectorAll("#styles button").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.style === (s.config.style ?? "orbs"))));
+  if (document.activeElement !== $("react")) $("react").value = s.config.reactivity ?? 1;
   if (s.config.theme !== theme) {
     theme = s.config.theme;
     setTheme(theme);

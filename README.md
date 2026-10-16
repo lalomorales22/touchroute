@@ -100,6 +100,14 @@ A fresh install comes with the grid already full of things to try: confetti, fir
 
 Don't want them? **Clear all** under the grid empties it, and **Add fun pack** brings them back without touching your own touches.
 
+## Make it yours
+
+The **Buddy** row in settings changes how your dots look:
+
+- **Themes:** Classic, Dusk, Neon, Cosmic (each orb is a glowing galaxy) and Galaxy (each orb is dark, quiet space). The dice picks one at random.
+- **Critters:** turns every dot into a little wiggly creature whose eyes follow your cursor.
+- **Calm to Hyper:** how much the dots wobble, hop and react to your fingers.
+
 ## Ideas
 
 | Touch | What it does |

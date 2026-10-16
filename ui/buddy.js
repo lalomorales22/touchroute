@@ -1,4 +1,4 @@
-import { invoke, listen, win, currentMonitor, LogicalSize, LogicalPosition, fingerColor, fingerHue, setTheme, isGalaxy, parseKey, slotCode, plural } from "./shared.js";
+import { invoke, listen, win, currentMonitor, LogicalSize, LogicalPosition, fingerColor, fingerHue, setTheme, isGalaxy, currentTheme, parseKey, slotCode, plural } from "./shared.js";
 
 // The buddy is just its dots, floating on the desktop with no backing. Each
 // colored dot is one of your touches. Zooming in spreads them slowly into a
@@ -26,6 +26,10 @@ const IDLE = { phase: "idle", fingers: 0, elapsed: 0, slot: null, at: 0 };
 
 let state = null;
 let theme = null;
+let style = "orbs";      // "orbs" or "critters"
+let react = 1;           // reactiveness, 0 (calm) to 2 (hyper)
+let shock = -1;          // when the dial last finished opening (for the shockwave)
+let pop = -1;            // when the dots last landed home (for the little flash)
 let slots = new Map();   // key -> { f, s, name }
 let dots = [];           // living dots, one per touch
 let dust = [];           // tiny ambient motes that keep an empty buddy alive
@@ -43,6 +47,8 @@ let readoutUntil = 0;
 
 function applyState(s) {
   state = s;
+  style = s.config.style ?? "orbs";
+  react = s.config.reactivity ?? 1;
   if (s.config.theme !== theme) {
     theme = s.config.theme;
     setTheme(theme);
@@ -76,6 +82,8 @@ function spawn(i, alive) {
     speed: (0.16 + Math.random() * 0.2) * (Math.random() < 0.5 ? -1 : 1),
     seed: Math.random() * 1000,
     hopAt: performance.now() / 1000 + 2 + Math.random() * 8,
+    blinkAt: performance.now() / 1000 + 1 + Math.random() * 5,
+    trail: [],
     size: alive ? 0 : 1.3 + Math.random() * 1.4,
     lit: 1,
   };
@@ -137,6 +145,7 @@ async function setOpen(next) {
     await win.setSize(new LogicalSize(DIAL, DIAL));
     resizing = false;
     open = true;
+    shock = performance.now() / 1000;
     document.body.classList.add("open");
   } else {
     open = false;
@@ -275,9 +284,12 @@ listen("config", ({ payload }) => applyState(payload));
 // wallpapers, a shaded body, and a highlight so it feels round.
 function bead(x, y, r, f, alpha, lit, seed = 0) {
   if (isGalaxy()) return galaxyBead(x, y, r * 1.25, f, alpha, lit, seed);
-  const halo = r * (2.4 + lit);
+  const fx = currentTheme();
+  const t = performance.now() / 1000;
+  const beat = fx.pulse ? 0.7 + 0.5 * Math.sin(t * 3 + seed) : 1;
+  const halo = r * (2.4 + lit) * (fx.pulse ? 1.25 : 1);
   const glow = ctx.createRadialGradient(x, y, r * 0.6, x, y, halo);
-  glow.addColorStop(0, fingerColor(f, 0.3 * alpha * lit));
+  glow.addColorStop(0, fingerColor(f, 0.3 * alpha * lit * beat));
   glow.addColorStop(1, fingerColor(f, 0));
   ctx.fillStyle = glow;
   ctx.beginPath(); ctx.arc(x, y, halo, 0, 7); ctx.fill();
@@ -291,8 +303,70 @@ function bead(x, y, r, f, alpha, lit, seed = 0) {
   ctx.fillStyle = body;
   ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
 
+  if (fx.ember) {
+    // A warm core that slowly glows and fades, like a coal.
+    const heat = 0.55 + 0.45 * Math.sin(t * 1.6 + seed * 2);
+    const core = ctx.createRadialGradient(x, y + r * 0.1, 0, x, y + r * 0.1, r * 0.75);
+    core.addColorStop(0, `hsla(${28 + heat * 14}, 100%, 66%, ${0.75 * heat * alpha})`);
+    core.addColorStop(1, "hsla(20, 100%, 50%, 0)");
+    ctx.fillStyle = core;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+  }
+  if (fx.sheen) {
+    // A glint that drifts around the inside of the glass.
+    const a = t * 0.7 + seed;
+    const gx = x + Math.cos(a) * r * 0.42, gy = y + Math.sin(a) * r * 0.42;
+    const glint = ctx.createRadialGradient(gx, gy, 0, gx, gy, r * 0.45);
+    glint.addColorStop(0, `rgba(255,255,255,${(fx.pulse ? 0.45 : 0.3) * alpha})`);
+    glint.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = glint;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+  }
+  if (fx.pulse) {
+    ctx.strokeStyle = fingerColor(f, 0.4 * beat * alpha, 80);
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(x, y, r + 2 + beat * 1.5, 0, 7); ctx.stroke();
+  }
+
   ctx.fillStyle = `rgba(255,255,255,${0.5 * alpha})`;
   ctx.beginPath(); ctx.arc(x - r * 0.33, y - r * 0.38, r * 0.26, 0, 7); ctx.fill();
+}
+
+// ---------- critters ----------
+
+// Eyes, blinks and a smile on top of a dot. The eyes follow the cursor, watch
+// the middle while fingers are down, and wander otherwise.
+function critterFace(x, y, r, d, alpha, t) {
+  let tx, ty;
+  const holding = touch.phase === "holding" || touch.phase === "settling";
+  if (mouse) { tx = mouse.x; ty = mouse.y; }
+  else if (holding) { const c = open ? dialCenter() : clusterCenter(); tx = c.x; ty = c.y; }
+  else { tx = x + Math.cos(t * 0.6 + d.seed) * 40; ty = y + Math.sin(t * 0.8 + d.seed * 1.3) * 30; }
+  const look = Math.atan2(ty - y, tx - x);
+  const reach = Math.min(1, Math.hypot(tx - x, ty - y) / 30);
+
+  if (t > d.blinkAt) { d.blinkStart = t; d.blinkAt = t + 2 + Math.random() * 5; }
+  const since = t - (d.blinkStart ?? -9);
+  const lid = since < 0.16 ? Math.max(0.1, Math.abs(Math.cos((since / 0.16) * Math.PI))) : 1;
+
+  for (const side of [-1, 1]) {
+    const ex = x + side * r * 0.36, ey = y - r * 0.12;
+    ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+    ctx.beginPath(); ctx.ellipse(ex, ey, r * 0.3, r * 0.36 * lid, 0, 0, 7); ctx.fill();
+    if (lid > 0.45) {
+      const px = ex + Math.cos(look) * r * 0.12 * reach, py = ey + Math.sin(look) * r * 0.14 * reach;
+      ctx.fillStyle = `rgba(14,14,18,${alpha})`;
+      ctx.beginPath(); ctx.arc(px, py, r * 0.16, 0, 7); ctx.fill();
+      ctx.fillStyle = `rgba(255,255,255,${0.9 * alpha})`;
+      ctx.beginPath(); ctx.arc(px - r * 0.05, py - r * 0.06, r * 0.05, 0, 7); ctx.fill();
+    }
+  }
+  // A small smile that grows into a grin when a touch fires.
+  const grin = Math.min(1, burst * 1.5);
+  ctx.strokeStyle = isGalaxy() ? `rgba(235,235,245,${0.7 * alpha})` : `rgba(20,20,26,${0.75 * alpha})`;
+  ctx.lineWidth = Math.max(0.8, r * 0.1);
+  ctx.lineCap = "round";
+  ctx.beginPath(); ctx.arc(x, y + r * 0.2, r * (0.2 + grin * 0.12), Math.PI * (0.18 - grin * 0.08), Math.PI * (0.82 + grin * 0.08)); ctx.stroke();
 }
 
 // ---------- cosmic theme ----------
@@ -307,32 +381,35 @@ function galaxy(f) {
   c.width = c.height = S;
   const g = c.getContext("2d");
   const h = fingerHue(f);
+  const dark = isGalaxy() === "dark";
   const bg = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
-  bg.addColorStop(0, `hsl(${h}, 60%, 22%)`);
-  bg.addColorStop(1, `hsl(${h + 40}, 70%, 5%)`);
+  bg.addColorStop(0, dark ? `hsl(${h}, 35%, 7%)` : `hsl(${h}, 60%, 22%)`);
+  bg.addColorStop(1, dark ? "#000" : `hsl(${h + 40}, 70%, 5%)`);
   g.fillStyle = bg;
   g.fillRect(0, 0, S, S);
   for (const [dh, n] of [[0, 4], [50, 3], [-60, 3]]) {
     for (let i = 0; i < n; i++) {
       const x = Math.random() * S, y = Math.random() * S, r = 18 + Math.random() * 30;
       const cloud = g.createRadialGradient(x, y, 0, x, y, r);
-      cloud.addColorStop(0, `hsla(${h + dh}, 95%, 62%, 0.55)`);
+      cloud.addColorStop(0, dark ? `hsla(${h + dh}, 60%, 40%, 0.16)` : `hsla(${h + dh}, 95%, 62%, 0.55)`);
       cloud.addColorStop(1, `hsla(${h + dh}, 95%, 50%, 0)`);
       g.fillStyle = cloud;
       g.fillRect(0, 0, S, S);
     }
   }
   for (let arm = 0; arm < 2; arm++) {
-    for (let i = 0; i < 160; i++) {
-      const k = i / 160;
+    for (let i = 0; i < (dark ? 90 : 160); i++) {
+      const k = i / (dark ? 90 : 160);
       const a = arm * Math.PI + k * 4.2 + (Math.random() - 0.5) * 0.5;
       const r = 4 + k * S * 0.48 + (Math.random() - 0.5) * 6;
-      g.fillStyle = `hsla(${h + 20 - k * 60}, 100%, ${85 - k * 25}%, ${0.9 - k * 0.5})`;
+      g.fillStyle = dark
+        ? `hsla(${h + 20 - k * 60}, 50%, ${60 - k * 25}%, ${0.45 - k * 0.3})`
+        : `hsla(${h + 20 - k * 60}, 100%, ${85 - k * 25}%, ${0.9 - k * 0.5})`;
       g.beginPath(); g.arc(S / 2 + Math.cos(a) * r, S / 2 + Math.sin(a) * r, 0.6 + Math.random() * 1.1, 0, 7); g.fill();
     }
   }
-  for (let i = 0; i < 70; i++) {
-    g.fillStyle = `rgba(255,255,255,${0.4 + Math.random() * 0.6})`;
+  for (let i = 0; i < (dark ? 35 : 70); i++) {
+    g.fillStyle = `rgba(255,255,255,${dark ? 0.15 + Math.random() * 0.5 : 0.4 + Math.random() * 0.6})`;
     g.beginPath(); g.arc(Math.random() * S, Math.random() * S, Math.random() * 1.2, 0, 7); g.fill();
   }
   galaxies.set(f, c);
@@ -341,10 +418,12 @@ function galaxy(f) {
 
 function galaxyBead(x, y, r, f, alpha, lit, seed) {
   const t = performance.now() / 1000;
-  const hue = (fingerHue(f) + t * 40 + seed * 3) % 360; // the rim slowly cycles color
-  const halo = r * (2.6 + lit);
+  const dark = isGalaxy() === "dark";
+  // Cosmic's rim cycles through colors; Galaxy's barely drifts.
+  const hue = (fingerHue(f) + t * (dark ? 6 : 40) + seed * 3) % 360;
+  const halo = r * (dark ? 1.8 + lit * 0.5 : 2.6 + lit);
   const glow = ctx.createRadialGradient(x, y, r * 0.6, x, y, halo);
-  glow.addColorStop(0, `hsla(${hue}, 100%, 65%, ${0.35 * alpha * lit})`);
+  glow.addColorStop(0, `hsla(${hue}, 100%, 65%, ${(dark ? 0.07 : 0.35) * alpha * lit})`);
   glow.addColorStop(1, `hsla(${hue}, 100%, 65%, 0)`);
   ctx.fillStyle = glow;
   ctx.beginPath(); ctx.arc(x, y, halo, 0, 7); ctx.fill();
@@ -364,10 +443,10 @@ function galaxyBead(x, y, r, f, alpha, lit, seed) {
   shade.addColorStop(1, `rgba(0,0,0,${0.55 * alpha})`);
   ctx.fillStyle = shade;
   ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
-  ctx.strokeStyle = `hsla(${hue}, 100%, 72%, ${0.85 * alpha})`;
-  ctx.lineWidth = 1.1;
+  ctx.strokeStyle = dark ? `hsla(${hue}, 40%, 55%, ${0.4 * alpha})` : `hsla(${hue}, 100%, 72%, ${0.85 * alpha})`;
+  ctx.lineWidth = dark ? 0.8 : 1.1;
   ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.stroke();
-  ctx.fillStyle = `rgba(255,255,255,${0.6 * alpha})`;
+  ctx.fillStyle = `rgba(255,255,255,${(dark ? 0.35 : 0.6) * alpha})`;
   ctx.beginPath(); ctx.arc(x - r * 0.35, y - r * 0.4, r * 0.22, 0, 7); ctx.fill();
 }
 
@@ -377,8 +456,11 @@ function drawDial(alpha) {
   const F = maxFingers(), S = maxSeconds();
   ctx.lineWidth = 1;
   for (let f = 1; f <= F; f++) {
+    // Each ring sweeps around from the top, inner rings first.
+    const sweep = clamp01(alpha * 1.6 - (f - 1) * 0.06) * Math.PI * 2;
+    if (sweep <= 0) continue;
     ctx.strokeStyle = `rgba(255,255,255,${0.06 * alpha})`;
-    ctx.beginPath(); ctx.arc(c.x, c.y, RING0 + (f - 1) * RING_STEP, 0, 7); ctx.stroke();
+    ctx.beginPath(); ctx.arc(c.x, c.y, RING0 + (f - 1) * RING_STEP, -Math.PI / 2, -Math.PI / 2 + sweep); ctx.stroke();
   }
   for (let f = 1; f <= F; f++) {
     for (let s = 1; s <= S; s++) {
@@ -435,6 +517,49 @@ function drawRing(c, elapsed, f, R) {
   }
 }
 
+// ---------- flight effects ----------
+
+function drawTrail(d, size, alpha) {
+  const n = d.trail.length;
+  if (n < 2) return;
+  ctx.lineCap = "round";
+  for (let i = 1; i < n; i++) {
+    const k = i / n;
+    ctx.strokeStyle = fingerColor(d.f, 0.35 * k * alpha, 84);
+    ctx.lineWidth = size * 1.2 * k;
+    ctx.beginPath();
+    ctx.moveTo(d.trail[i - 1].x, d.trail[i - 1].y);
+    ctx.lineTo(d.trail[i].x, d.trail[i].y);
+    ctx.stroke();
+  }
+}
+
+// A ring of light that rolls out from the middle as the dial opens.
+function drawShock(t) {
+  const age = t - shock;
+  if (shock < 0 || age > 1.1) return;
+  const c = dialCenter();
+  const k = age / 1.1;
+  const r = 30 + k * (RING0 + (maxFingers() - 1) * RING_STEP + 30);
+  ctx.lineWidth = 2.5 * (1 - k) + 0.5;
+  ctx.strokeStyle = `rgba(255,255,255,${0.3 * (1 - k)})`;
+  ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, 7); ctx.stroke();
+  ctx.strokeStyle = fingerColor(1 + Math.floor(t * 4) % maxFingers(), 0.35 * (1 - k), 80);
+  ctx.beginPath(); ctx.arc(c.x, c.y, r * 0.86, 0, 7); ctx.stroke();
+}
+
+// A soft flash where the dots land when the dial closes.
+function drawPop(t, c) {
+  const age = t - pop;
+  if (pop < 0 || age > 0.6) return;
+  const k = age / 0.6;
+  const g = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, 20 + k * 60);
+  g.addColorStop(0, `rgba(255,255,255,${0.35 * (1 - k)})`);
+  g.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(c.x, c.y, 20 + k * 60, 0, 7); ctx.fill();
+}
+
 // ---------- animation ----------
 
 let last = performance.now();
@@ -444,7 +569,8 @@ function frame(now) {
   requestAnimationFrame(frame);
   const moving = open ? openT < fullyOpen() : openT > 0;
   const holding = touch.phase === "holding" || touch.phase === "settling";
-  const active = moving || open || holding || burst > 0.01 || mouse || $("readout").classList.contains("show");
+  const popping = now / 1000 - pop < 0.6;
+  const active = moving || open || holding || popping || style === "critters" || burst > 0.01 || mouse || $("readout").classList.contains("show");
   // At rest the buddy runs at 30fps to stay light on the battery.
   skip = !skip;
   if (!active && skip) return;
@@ -456,7 +582,10 @@ function frame(now) {
   const step = reduced ? 99 : dt;
   const prevT = openT;
   openT = open ? Math.min(fullyOpen(), openT + step) : Math.max(0, openT - step);
-  if (!open && prevT > 0 && openT === 0 && (shift.x || shift.y) && !resizing) shrink();
+  if (!open && prevT > 0 && openT === 0) {
+    pop = now / 1000;
+    if ((shift.x || shift.y) && !resizing) shrink();
+  }
   if (now > readoutUntil) $("readout").classList.remove("show");
 
   const { w, h } = view();
@@ -465,25 +594,28 @@ function frame(now) {
   const c = clusterCenter();
   const counting = touch.phase === "holding";
   const elapsed = counting ? touch.elapsed + (now - touch.at) / 1000 : 0;
-  const breathe = 1 + Math.sin(t * 1.2) * 0.06;
-  const squeeze = holding ? 0.6 : 1;
+  // Reactiveness scales how much the dots wobble, hop, lean and react.
+  const R = reduced ? 0 : react;
+  const breathe = 1 + Math.sin(t * 1.2) * 0.06 * (0.4 + 0.6 * R);
+  const squeeze = holding ? Math.max(0.3, 1 - 0.4 * R) : 1;
   burst *= Math.pow(0.05, dt);
   const follow = 1 - Math.exp(-dt * 5);
 
   drawDial(clamp01((openT - TRAVEL * 0.5) / 0.6));
+  drawShock(t);
 
   // Living positions: each dot orbits, wobbles, breathes, hops now and then,
   // and leans a little toward the cursor.
   const live = (d, amp) => {
-    d.angle += d.speed * dt * (holding ? 3 : 1);
-    if (t > d.hopAt) d.hopAt = t + 4 + Math.random() * 9;
-    const sinceHop = t - (d.hopAt - 4);
+    d.angle += d.speed * dt * (holding ? 1 + 2 * R : 0.5 + 0.5 * R);
+    if (t > d.hopAt) d.hopAt = t + (4 + Math.random() * 9) / (0.3 + 0.7 * R);
+    const sinceHop = t - d.hopAt + 4 / (0.3 + 0.7 * R);
     const hop = reduced ? 0 : Math.max(0, Math.sin(Math.min(1, Math.max(0, sinceHop / 0.45)) * Math.PI)) * (sinceHop < 0.45 ? 1 : 0);
-    const wob = reduced ? 0 : Math.sin(t * 1.7 + d.seed) * 4 * amp + Math.sin(t * 0.6 + d.seed * 2) * 3 * amp;
-    const r = (d.orbit * breathe + wob) * squeeze * (1 + burst * 0.8);
+    const wob = reduced ? 0 : (Math.sin(t * 1.7 + d.seed) * 4 * amp + Math.sin(t * 0.6 + d.seed * 2) * 3 * amp) * (0.3 + 0.7 * R);
+    const r = (d.orbit * breathe + wob) * squeeze * (1 + burst * 0.8 * R);
     let x = c.x + Math.cos(d.angle) * r;
-    let y = c.y + Math.sin(d.angle) * r * 0.88 - hop * 6;
-    if (mouse && !open) { x += (mouse.x - x) * 0.07; y += (mouse.y - y) * 0.07; }
+    let y = c.y + Math.sin(d.angle) * r * 0.88 - hop * 6 * R;
+    if (mouse && !open) { x += (mouse.x - x) * 0.07 * R; y += (mouse.y - y) * 0.07 * R; }
     d.lx += (x - d.lx) * follow;
     d.ly += (y - d.ly) * follow;
     return { x: d.lx, y: d.ly };
@@ -499,6 +631,8 @@ function frame(now) {
     ctx.beginPath(); ctx.arc(p.x, p.y, d.size, 0, 7); ctx.fill();
   }
 
+  const D = dialCenter();
+  const critters = style === "critters";
   for (const d of dots) {
     const home = live(d, 1);
     const k = progress(d.f);
@@ -506,13 +640,47 @@ function frame(now) {
     const j = reduced ? 0 : 1.2;
     const lx = L.x + Math.sin(t * 2.1 + d.seed) * j;
     const ly = L.y + Math.cos(t * 1.8 + d.seed) * j;
-    d.x = home.x + (lx - home.x) * k;
-    d.y = home.y + (ly - home.y) * k;
-    const litTarget = holding && touch.fingers ? (d.f === touch.fingers ? 1.5 : 0.45) : d.key === hover ? 1.6 : 1;
+    if (k <= 0 || k >= 1) {
+      d.x = k >= 1 ? lx : home.x;
+      d.y = k >= 1 ? ly : home.y;
+    } else {
+      // Fly along a swirl around the dial's center instead of a straight line:
+      // swing out wide, spin a little (odd rings one way, even the other),
+      // and land with a small overshoot.
+      const aH = Math.atan2(home.y - D.y, home.x - D.x), rH = Math.hypot(home.x - D.x, home.y - D.y);
+      const aL = Math.atan2(ly - D.y, lx - D.x), rL = Math.hypot(lx - D.x, ly - D.y);
+      let da = aL - aH;
+      da = ((da + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+      const arc = Math.sin(k * Math.PI);
+      const a = aH + da * k + (d.f % 2 ? 1 : -1) * 1.3 * arc;
+      const r = rH + (rL - rH) * k + 26 * arc + 10 * Math.sin(k * Math.PI * 2) * k;
+      d.x = D.x + Math.cos(a) * r;
+      d.y = D.y + Math.sin(a) * r;
+    }
+    // A short comet tail while flying.
+    if (k > 0 && k < 1) d.trail.push({ x: d.x, y: d.y });
+    if (d.trail.length > 9 || ((k <= 0 || k >= 1) && d.trail.length)) d.trail.shift();
+    const dim = holding && touch.fingers ? 1 - 0.55 * Math.min(1, R) : 1;
+    const litTarget = holding && touch.fingers ? (d.f === touch.fingers ? 1 + 0.5 * R : dim) : d.key === hover ? 1.6 : 1;
     d.lit += (litTarget - d.lit) * follow;
-    const size = (4.6 + Math.min(d.s, 8) * 0.3) * (1 - 0.22 * k) * (d.key === hover ? 1.25 : 1);
-    bead(d.x, d.y, size, d.f, Math.min(1, 0.55 + 0.45 * d.lit), d.lit, d.seed);
+    const size = (4.6 + Math.min(d.s, 8) * 0.3) * (1 - 0.22 * k) * (d.key === hover ? 1.25 : 1) * (critters ? 1.45 : 1);
+    const alpha = Math.min(1, 0.55 + 0.45 * d.lit);
+    drawTrail(d, size, alpha);
+    if (critters) {
+      // Squash and stretch, so each critter wiggles.
+      const wig = Math.sin(t * (4 + R * 3) + d.seed * 5) * 0.09 * (0.3 + 0.7 * R);
+      ctx.save();
+      ctx.translate(d.x, d.y);
+      ctx.scale(1 + wig, 1 - wig);
+      ctx.translate(-d.x, -d.y);
+      bead(d.x, d.y, size, d.f, alpha, d.lit, d.seed);
+      ctx.restore();
+      critterFace(d.x, d.y - size * wig * 0.5, size * (isGalaxy() ? 1.25 : 1), d, alpha, t);
+    } else {
+      bead(d.x, d.y, size, d.f, alpha, d.lit, d.seed);
+    }
   }
+  drawPop(t, c);
 
   if (counting || touch.phase === "fired") {
     if (openT > 0) {

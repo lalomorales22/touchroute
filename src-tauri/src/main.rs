@@ -104,12 +104,26 @@ fn clear_all(app: AppHandle) {
     config_changed(&app);
 }
 
+/// Changes how the buddy looks. Any field left out stays as it is.
 #[tauri::command]
-fn set_theme(app: AppHandle, theme: String) -> Result<(), String> {
-    if !config::THEMES.contains(&theme.as_str()) {
+fn set_look(app: AppHandle, theme: Option<String>, style: Option<String>, reactivity: Option<f64>) -> Result<(), String> {
+    if theme.as_deref().is_some_and(|t| !config::THEMES.contains(&t)) {
         return Err("Unknown theme.".into());
     }
-    config::update(|c| c.theme = theme);
+    if style.as_deref().is_some_and(|s| !config::STYLES.contains(&s)) {
+        return Err("Unknown style.".into());
+    }
+    config::update(|c| {
+        if let Some(t) = theme {
+            c.theme = t;
+        }
+        if let Some(s) = style {
+            c.style = s;
+        }
+        if let Some(r) = reactivity {
+            c.reactivity = r.clamp(0.0, 2.0);
+        }
+    });
     config_changed(&app);
     Ok(())
 }
@@ -290,7 +304,7 @@ fn main() {
             delete_slot,
             test_slot,
             set_enabled,
-            set_theme,
+            set_look,
             open_settings,
             open_folder,
             check_update,

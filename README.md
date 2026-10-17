@@ -135,6 +135,8 @@ The **Buddy** row in settings changes how your dots look:
 
 - **Themes:** Classic, Dusk, Neon, Cosmic (each orb is a glowing galaxy) and Galaxy (each orb is dark, quiet space). The dice picks one at random.
 - **Critters:** turns every dot into a little wiggly creature whose eyes follow your cursor.
+- **Penguins:** a waddling colony with big eyes, diamond beaks and flapping flippers, tinted by finger count.
+- **Chatty:** every 2 to 7 minutes, at random, one of them pipes up in a comic speech bubble: a joke, something sweet, a push to keep going, or a handy Mac tip. It knows the time of day, notices when your Mac is busy, and says hi when you come back. Over a thousand lines. Click the swarm to make one talk right now.
 - **Calm to Hyper:** how much the dots wobble, hop and react to your fingers.
 
 ## Ideas

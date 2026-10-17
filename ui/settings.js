@@ -803,6 +803,7 @@ function openedPack(r) {
 listen("pack-open", ({ payload }) => { invoke("take_opened_pack"); openedPack(payload); });
 
 $("haptics").onchange = (e) => invoke("set_haptics", { on: e.target.checked });
+$("chatty").onchange = (e) => invoke("set_look", { chatty: e.target.checked });
 
 // ---------- state ----------
 
@@ -822,6 +823,7 @@ function applyState(s) {
   }
   $("enabled").checked = s.config.enabled;
   $("haptics").checked = s.config.haptics ?? true;
+  $("chatty").checked = s.config.chatty ?? true;
   if (drawing?.id && !s.config.drawings.some((d) => d.id === drawing.id)) closeEditor();
   paintDrawings();
   buildEffects();

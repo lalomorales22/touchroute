@@ -30,12 +30,15 @@ pub struct Config {
     /// Orb color theme: classic, dusk, neon, cosmic or galaxy.
     #[serde(default = "classic")]
     pub theme: String,
-    /// What the buddy's dots look like: plain "orbs", or "critters" with eyes.
+    /// What the buddy's dots look like: plain "orbs", "critters" with eyes, or "penguins".
     #[serde(default = "orbs")]
     pub style: String,
     /// How lively the dots are, from 0 (calm) to 2 (hyper).
     #[serde(default = "one")]
     pub reactivity: f64,
+    /// Let the dots pipe up with a joke, a tip or a kind word now and then.
+    #[serde(default = "yes")]
+    pub chatty: bool,
     /// Tap the trackpad as each second passes and when a touch fires.
     #[serde(default = "yes")]
     pub haptics: bool,
@@ -72,7 +75,7 @@ fn yes() -> bool {
 }
 
 pub const THEMES: [&str; 5] = ["classic", "dusk", "neon", "cosmic", "galaxy"];
-pub const STYLES: [&str; 2] = ["orbs", "critters"];
+pub const STYLES: [&str; 3] = ["orbs", "critters", "penguins"];
 
 static CONFIG: Mutex<Option<Config>> = Mutex::new(None);
 /// Where the buddy was dragged to; folded into config.json on the next save.
@@ -204,6 +207,7 @@ pub fn init() {
             style: orbs(),
             reactivity: one(),
             haptics: true,
+            chatty: true,
             drawings: Vec::new(),
             fun_version: crate::starter::FUN_VERSION,
         }

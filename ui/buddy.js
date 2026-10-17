@@ -1,3 +1,4 @@
+import SAYINGS from "./sayings.js";
 import { invoke, listen, win, currentMonitor, LogicalSize, LogicalPosition, fingerColor, fingerHue, setTheme, isGalaxy, currentTheme, parseKey, slotCode, plural } from "./shared.js";
 
 // The buddy is just its dots, floating on the desktop with no backing. Each
@@ -26,7 +27,12 @@ const IDLE = { phase: "idle", fingers: 0, elapsed: 0, slot: null, at: 0 };
 
 let state = null;
 let theme = null;
-let style = "orbs";      // "orbs" or "critters"
+let style = "orbs";      // "orbs", "critters" or "penguins"
+let chatty = true;       // critters say things now and then
+let speech = null;       // who's talking: { d, text, start, until }
+let nextChat = performance.now() / 1000 + 25 + Math.random() * 50;
+let backChat = -1;       // say hello this soon after you come back
+let clickTimer = null;
 let react = 1;           // reactiveness, 0 (calm) to 2 (hyper)
 let shock = -1;          // when the dial last finished opening (for the shockwave)
 let pop = -1;            // when the dots last landed home (for the little flash)
@@ -56,7 +62,11 @@ let lastZ = 0;
 
 function setMood(m) {
   const t = performance.now() / 1000;
-  if (mood.away && !m.away) { wokeAt = t; burst = Math.max(burst, 0.8); }
+  if (mood.away && !m.away) {
+    wokeAt = t;
+    burst = Math.max(burst, 0.8);
+    if (Math.random() < 0.7) backChat = t + 1.5;
+  }
   if (!mood.charging && m.charging && m.battery != null) zapAt = t;
   mood = m;
 }
@@ -68,6 +78,7 @@ function applyState(s) {
   state = s;
   if (s.mood) setMood(s.mood);
   style = s.config.style ?? "orbs";
+  chatty = s.config.chatty ?? true;
   react = s.config.reactivity ?? 1;
   if (s.config.theme !== theme) {
     theme = s.config.theme;
@@ -228,6 +239,16 @@ document.addEventListener("mouseup", () => {
   if (press && settled()) {
     const key = spotAt(press.cx, press.cy);
     if (key) invoke("open_settings", { slot: key });
+  } else if (press && !open && chatty) {
+    // A single click on the swarm: the nearest dot says something. Waits a
+    // beat so a double-click (which opens the dial) doesn't count.
+    const { cx, cy } = press;
+    clearTimeout(clickTimer);
+    clickTimer = setTimeout(() => {
+      let best = null, bestD = 28;
+      for (const d of dots) { const k = Math.hypot(d.x - cx, d.y - cy); if (k < bestD) { bestD = k; best = d; } }
+      if (best) say(best, line({ busy: mood.busy }));
+    }, 280);
   }
   press = null;
 });
@@ -236,6 +257,7 @@ document.addEventListener("mouseleave", () => {
   if (hover) { hover = null; updateHub(); }
 });
 document.addEventListener("dblclick", (e) => {
+  clearTimeout(clickTimer);
   if (e.target.closest?.("button")) return;
   if (settled() && spotAt(e.clientX, e.clientY)) return; // that was a click on a spot
   setOpen(!open);
@@ -357,7 +379,15 @@ function bead(x, y, r, f, alpha, lit, seed = 0) {
 
 // Eyes, blinks and a smile on top of a dot. The eyes follow the cursor, watch
 // the middle while fingers are down, and wander otherwise.
-function critterFace(x, y, r, d, alpha, t, feel) {
+// Eye placement for each kind of face: critters have them mid-body, penguins
+// higher up on a white face, with an outline so they read against it.
+const FACES = {
+  critter: { dx: 0.36, dy: -0.12, rx: 0.3, ry: 0.36, pupil: 0.16 },
+  penguin: { dx: 0.3, dy: -0.26, rx: 0.27, ry: 0.31, pupil: 0.17, outline: true },
+};
+
+function critterFace(x, y, r, d, alpha, t, feel, kind = "critter") {
+  const F = FACES[kind];
   let tx, ty;
   const holding = touch.phase === "holding" || touch.phase === "settling";
   if (mouse) { tx = mouse.x; ty = mouse.y; }
@@ -376,11 +406,13 @@ function critterFace(x, y, r, d, alpha, t, feel) {
   if (feel.drowsy) lid = Math.min(lid, 0.55);
   const closed = feel.asleep || yawn > 0.3;
   const wide = feel.surprised ? 1.25 : 1;
-  const ink = isGalaxy() ? `rgba(235,235,245,${0.75 * alpha})` : `rgba(20,20,26,${0.75 * alpha})`;
+  const ink = isGalaxy() && kind === "critter" ? `rgba(235,235,245,${0.75 * alpha})` : `rgba(20,20,26,${0.8 * alpha})`;
+  const talking = speech && speech.d === d && t < speech.until;
+  const chatter = talking ? Math.max(0, Math.sin(t * 17)) : 0;
   ctx.lineCap = "round";
 
   for (const side of [-1, 1]) {
-    const ex = x + side * r * 0.36, ey = y - r * 0.12;
+    const ex = x + side * r * F.dx, ey = y + r * F.dy;
     if (closed) {
       // Shut eyes: two little downward curves.
       ctx.strokeStyle = ink;
@@ -389,19 +421,31 @@ function critterFace(x, y, r, d, alpha, t, feel) {
       continue;
     }
     ctx.fillStyle = `rgba(255,255,255,${alpha})`;
-    ctx.beginPath(); ctx.ellipse(ex, ey, r * 0.3 * wide, r * 0.36 * lid * wide, 0, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(ex, ey, r * F.rx * wide, r * F.ry * lid * wide, 0, 0, 7); ctx.fill();
+    if (F.outline) {
+      ctx.strokeStyle = `rgba(20,20,26,${0.55 * alpha})`;
+      ctx.lineWidth = Math.max(0.6, r * 0.05);
+      ctx.stroke();
+    }
     if (lid > 0.45) {
       const px = ex + Math.cos(look) * r * 0.12 * reach, py = ey + Math.sin(look) * r * 0.14 * reach * lid;
       ctx.fillStyle = `rgba(14,14,18,${alpha})`;
-      ctx.beginPath(); ctx.arc(px, py, r * (feel.surprised ? 0.1 : 0.16), 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(px, py, r * (feel.surprised ? 0.1 : F.pupil), 0, 7); ctx.fill();
       ctx.fillStyle = `rgba(255,255,255,${0.9 * alpha})`;
       ctx.beginPath(); ctx.arc(px - r * 0.05, py - r * 0.06, r * 0.05, 0, 7); ctx.fill();
     }
   }
+  if (kind === "penguin") {
+    const o = feel.asleep ? 0 : Math.max(chatter, yawn, feel.surprised ? 0.7 : 0, Math.min(1, burst * 1.2));
+    beak(x, y + r * 0.08, r, o, alpha);
+    return;
+  }
   ctx.strokeStyle = ink;
   ctx.fillStyle = ink;
   ctx.lineWidth = Math.max(0.8, r * 0.1);
-  if (feel.asleep) {
+  if (talking) {
+    ctx.beginPath(); ctx.ellipse(x, y + r * 0.3, r * 0.13, r * (0.05 + 0.13 * chatter), 0, 0, 7); ctx.fill();
+  } else if (feel.asleep) {
     // A little "o" that breathes in and out.
     const b = 0.6 + 0.4 * Math.sin(t * 1.4 + d.seed);
     ctx.beginPath(); ctx.ellipse(x, y + r * 0.32, r * 0.08 * b, r * 0.1 * b, 0, 0, 7); ctx.fill();
@@ -421,6 +465,171 @@ function critterFace(x, y, r, d, alpha, t, feel) {
     const grin = Math.min(1, burst * 1.5);
     ctx.beginPath(); ctx.arc(x, y + r * 0.2, r * (0.2 + grin * 0.12), Math.PI * (0.18 - grin * 0.08), Math.PI * (0.82 + grin * 0.08)); ctx.stroke();
   }
+}
+
+// ---------- chatter ----------
+
+// Every 2 to 7 minutes, at random, one of the dots says something: a joke,
+// something sweet, a nudge, or a handy tip. Clicking the swarm makes the
+// nearest one talk right away.
+const recent = [];
+function line(feel) {
+  const h = new Date().getHours();
+  const time = h >= 5 && h < 12 ? "morning" : h >= 13 && h < 17 ? "afternoon" : h >= 18 && h < 23 ? "evening" : h >= 23 || h < 5 ? "night" : null;
+  const bag = [["funny", 26], ["cute", 26], ["inspire", 20], ["tips", 20]];
+  if (time) bag.push([time, 12]);
+  if (feel.busy) bag.push(["busy", 40]);
+  let roll = Math.random() * bag.reduce((a, [, w]) => a + w, 0);
+  let kind = bag[0][0];
+  for (const [k, w] of bag) { if ((roll -= w) < 0) { kind = k; break; } }
+  return pickFrom(kind);
+}
+function pickFrom(kind) {
+  const list = SAYINGS[kind]?.length ? SAYINGS[kind] : SAYINGS.cute;
+  let text = list[Math.floor(Math.random() * list.length)];
+  for (let i = 0; i < 12 && recent.includes(text); i++) text = list[Math.floor(Math.random() * list.length)];
+  recent.push(text);
+  if (recent.length > 200) recent.shift();
+  return text;
+}
+
+// A dot in the middle band of the swarm, so the bubble has room above it.
+function speaker() {
+  if (!dots.length) return null;
+  const mid = dots.filter((d) => d.y > 95 && d.y < COMPACT - 45);
+  const list = mid.length ? mid : dots;
+  return list[Math.floor(Math.random() * list.length)];
+}
+
+function say(d, text) {
+  const t = performance.now() / 1000;
+  speech = { d, text, start: t, until: t + Math.min(9, 3.4 + text.length * 0.06) };
+  const b = $("bubble");
+  b.querySelector(".now").textContent = "";
+  b.querySelector(".later").textContent = text;
+  b.classList.remove("show");
+  void b.offsetWidth;
+  b.classList.add("show");
+  if (d) d.hopAt = t; // a little hop as it starts talking
+}
+
+function hush() {
+  speech = null;
+  $("bubble").classList.remove("show");
+}
+
+function chat(t, feel, holding) {
+  const quiet = !chatty || open || openT > 0 || holding || feel.asleep || resizing;
+  if (speech && (t > speech.until || open || holding)) hush();
+  if (backChat > 0 && t > backChat) {
+    backChat = -1;
+    if (!quiet) say(speaker(), pickFrom("back"));
+  }
+  if (t > nextChat) {
+    // Busy or asleep right now: try again in a little while.
+    if (quiet) nextChat = t + 20 + Math.random() * 40;
+    else { say(speaker(), line(feel)); nextChat = t + 120 + Math.random() * 300; }
+  }
+  if (!speech) return;
+  // Type the words out, and keep the bubble pointing at whoever's talking.
+  const b = $("bubble");
+  const n = Math.min(speech.text.length, Math.floor((t - speech.start) * 38));
+  if (b.querySelector(".now").textContent.length !== n) {
+    b.querySelector(".now").textContent = speech.text.slice(0, n);
+    b.querySelector(".later").textContent = speech.text.slice(n);
+  }
+  const c = clusterCenter();
+  const sx = speech.d ? speech.d.x : c.x;
+  const top = speech.d ? speech.d.y - 15 : c.y - 30;
+  const w = b.offsetWidth, h = b.offsetHeight;
+  const left = Math.max(4, Math.min(COMPACT - w - 4, sx - w / 2));
+  let y = top - h - 12;
+  const below = y < 2;
+  if (below) y = (speech.d ? speech.d.y + 16 : c.y + 30) + 12;
+  b.style.left = `${left}px`;
+  b.style.top = `${y}px`;
+  b.style.setProperty("--tail", `${Math.max(16, Math.min(w - 16, sx - left))}px`);
+  b.classList.toggle("below", below);
+}
+
+// ---------- penguins ----------
+
+// A little penguin: a dark body tinted by its finger color (so the colors still
+// tell you how many fingers), a white face and belly, flapping flippers and
+// orange feet. The face is drawn by critterFace with big eyes and a beak.
+function penguin(x, y, r, d, alpha, t, feel, flap) {
+  const h = fingerHue(d.f);
+  const glow = ctx.createRadialGradient(x, y, r * 0.8, x, y, r * (2.2 + d.lit * 0.6));
+  glow.addColorStop(0, fingerColor(d.f, 0.22 * alpha * d.lit));
+  glow.addColorStop(1, fingerColor(d.f, 0));
+  ctx.fillStyle = glow;
+  ctx.beginPath(); ctx.arc(x, y, r * (2.2 + d.lit * 0.6), 0, 7); ctx.fill();
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  // Feet, peeking out under the body.
+  ctx.fillStyle = "#f59a23";
+  for (const side of [-1, 1]) {
+    ctx.beginPath(); ctx.ellipse(x + side * r * 0.36, y + r * 1.12, r * 0.26, r * 0.12, 0, 0, 7); ctx.fill();
+  }
+  // Flippers, out to the sides, flapping.
+  const body = `hsl(${h}, 30%, 17%)`;
+  ctx.fillStyle = body;
+  for (const side of [-1, 1]) {
+    ctx.save();
+    ctx.translate(x + side * r * 0.86, y + r * 0.05);
+    ctx.rotate(side * (0.35 + flap));
+    ctx.beginPath(); ctx.ellipse(0, r * 0.32, r * 0.17, r * 0.46, 0, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+  // Body, shaded so it feels round, with a colored rim.
+  const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.5, r * 0.1, x, y, r * 1.25);
+  g.addColorStop(0, `hsl(${h}, 32%, 30%)`);
+  g.addColorStop(1, `hsl(${h}, 30%, 9%)`);
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.ellipse(x, y + r * 0.1, r, r * 1.12, 0, 0, 7); ctx.fill();
+  ctx.strokeStyle = fingerColor(d.f, 0.55, 70);
+  ctx.lineWidth = Math.max(0.8, r * 0.07);
+  ctx.stroke();
+  // White face (a mask around both eyes) and belly.
+  ctx.fillStyle = "#f5f6f8";
+  ctx.beginPath(); ctx.ellipse(x, y + r * 0.42, r * 0.62, r * 0.66, 0, 0, 7); ctx.fill();
+  for (const side of [-1, 1]) {
+    ctx.beginPath(); ctx.arc(x + side * r * 0.3, y - r * 0.2, r * 0.42, 0, 7); ctx.fill();
+  }
+  ctx.fillStyle = "rgba(0,0,0,0.08)";
+  ctx.beginPath(); ctx.ellipse(x, y + r * 0.62, r * 0.5, r * 0.4, 0, 0, Math.PI); ctx.fill();
+  // A shine on the head.
+  ctx.fillStyle = "rgba(255,255,255,0.35)";
+  ctx.beginPath(); ctx.ellipse(x - r * 0.42, y - r * 0.72, r * 0.18, r * 0.09, -0.6, 0, 7); ctx.fill();
+  ctx.restore();
+}
+
+// A diamond beak between the eyes with a dark line for the mouth. `open`
+// from 0 to 1 parts the two halves (talking, yawning, cheering).
+function beak(x, y, r, open, alpha) {
+  const w = r * 0.21, hh = r * 0.17, gap = open * r * 0.09;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  if (gap > 0.3) {
+    ctx.fillStyle = "#3a1208";
+    ctx.beginPath(); ctx.ellipse(x, y, w * 0.7, gap, 0, 0, 7); ctx.fill();
+  }
+  ctx.fillStyle = "#ffa62b";
+  ctx.strokeStyle = "#c46a0c";
+  ctx.lineWidth = Math.max(0.5, r * 0.035);
+  ctx.lineJoin = "round";
+  // Top half.
+  ctx.beginPath(); ctx.moveTo(x - w, y - gap); ctx.lineTo(x, y - hh - gap); ctx.lineTo(x + w, y - gap); ctx.closePath(); ctx.fill(); ctx.stroke();
+  // Bottom half.
+  ctx.fillStyle = "#f08c12";
+  ctx.beginPath(); ctx.moveTo(x - w, y + gap); ctx.lineTo(x, y + hh * 0.85 + gap); ctx.lineTo(x + w, y + gap); ctx.closePath(); ctx.fill(); ctx.stroke();
+  // The line across the middle.
+  ctx.strokeStyle = "#1a0d06";
+  ctx.lineWidth = Math.max(0.7, r * 0.05);
+  ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(x - w * 0.95, y - gap); ctx.lineTo(x + w * 0.95, y - gap); ctx.stroke();
+  ctx.restore();
 }
 
 // ---------- moods ----------
@@ -696,7 +905,7 @@ function frame(now) {
   const moving = open ? openT < fullyOpen() : openT > 0;
   const holding = touch.phase === "holding" || touch.phase === "settling";
   const popping = now / 1000 - pop < 0.6;
-  const active = moving || open || holding || popping || style === "critters" || burst > 0.01 || mouse || $("readout").classList.contains("show");
+  const active = moving || open || holding || popping || style !== "orbs" || burst > 0.01 || mouse || $("readout").classList.contains("show");
   // At rest the buddy runs at 30fps to stay light on the battery.
   skip = !skip;
   if (!active && skip) return;
@@ -769,6 +978,7 @@ function frame(now) {
 
   const D = dialCenter();
   const critters = style === "critters";
+  const penguins = style === "penguins";
   for (const d of dots) {
     const home = live(d, 1);
     const k = progress(d.f);
@@ -799,7 +1009,7 @@ function frame(now) {
     const dim = holding && touch.fingers ? 1 - 0.55 * Math.min(1, R) : 1;
     const litTarget = holding && touch.fingers ? (d.f === touch.fingers ? 1 + 0.5 * R : dim) : d.key === hover ? 1.6 : 1;
     d.lit += (litTarget - d.lit) * follow;
-    const size = (4.6 + Math.min(d.s, 8) * 0.3) * (1 - 0.22 * k) * (d.key === hover ? 1.25 : 1) * (critters ? 1.45 : 1);
+    const size = (4.6 + Math.min(d.s, 8) * 0.3) * (1 - 0.22 * k) * (d.key === hover ? 1.25 : 1) * (critters ? 1.45 : penguins ? 1.5 : 1);
     const alpha = Math.min(1, 0.55 + 0.45 * d.lit);
     drawTrail(d, size, alpha);
     if (critters) {
@@ -812,11 +1022,24 @@ function frame(now) {
       bead(d.x, d.y, size, d.f, alpha, d.lit, d.seed);
       ctx.restore();
       critterFace(d.x, d.y - size * wig * 0.5, size * (isGalaxy() ? 1.25 : 1), d, alpha, t, feel);
+    } else if (penguins) {
+      // A side-to-side waddle, and flippers that flap harder when excited.
+      const sway = Math.sin(t * (3 + R * 2) * pace + d.seed * 5) * 0.12 * (0.3 + 0.7 * R) * (feel.asleep ? 0.3 : 1);
+      const talking = speech && speech.d === d && t < speech.until;
+      const flap = Math.abs(Math.sin(t * (talking || burst > 0.1 ? 14 : 3) + d.seed)) * (0.15 + 0.5 * Math.min(1, burst + (talking ? 0.6 : 0))) * (feel.asleep ? 0.2 : 1);
+      ctx.save();
+      ctx.translate(d.x, d.y + size);
+      ctx.rotate(sway);
+      ctx.translate(-d.x, -d.y - size);
+      penguin(d.x, d.y, size, d, alpha, t, feel, flap);
+      critterFace(d.x, d.y, size, d, alpha, t, feel, "penguin");
+      ctx.restore();
     } else {
       bead(d.x, d.y, size, d.f, alpha, d.lit, d.seed);
     }
   }
   drawPop(t, c);
+  chat(t, feel, holding);
   if (!open && openT === 0) {
     drawZs(t, dt, c, feel);
     drawSweat(t, dt, feel);

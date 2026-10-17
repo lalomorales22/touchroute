@@ -37,7 +37,7 @@ Everything you need is in plain files. The app watches them and picks up changes
 
 - `slots` keys are `"N-S"`. `name` is the label the user sees on their desktop buddy, so keep it to 2 to 4 words. `prompt` is the plain-English request the touch came from (optional, but fill it in so the user can revise it later).
 - `enabled: false` pauses every touch. Don't change it unless asked.
-- The buddy's look: `theme` is `classic`, `dusk` (darker), `neon` (brighter), `cosmic` (glowing galaxy orbs) or `galaxy` (dark space orbs); `style` is `orbs` or `critters` (dots with eyes); `reactivity` runs from 0 (calm) to 2 (hyper). Change these only when the user asks.
+- The buddy's look: `theme` is `classic`, `dusk` (darker), `neon` (brighter), `cosmic` (glowing galaxy orbs) or `galaxy` (dark space orbs); `style` is `orbs`, `critters` (dots with eyes) or `penguins`; `chatty` (true/false) lets the dots say a joke, kind word or tip in a speech bubble every few minutes; `reactivity` runs from 0 (calm) to 2 (hyper). Change these only when the user asks.
 - `haptics` (true/false) turns the trackpad clicks on or off. Change it only when asked.
 - Leave `buddy_position`, `fun_version` and any other fields alone.
 
